@@ -325,14 +325,17 @@
     if (players.length < 2) return showToast('Necesitas 2 jugadores');
     await update(ref(db, `rooms/${currentRoomId}`), {
       status: 'playing', currentRound: 1,
+      roundPhase: 'type_selection',
       roundStartTime: serverTimestamp(),
       rounds: []
     });
   };
 
   // ===================== GAME LOGIC =====================
+  // roundPhase: 'type_selection' | 'no_combo' | 'pokemon_race'
   let myTypesUsed = [];
-  let hasAnswered = false;
+  let hasAnsweredType = false;
+  let hasAnsweredPokemon = false;
   let roundAnswerTime = null;
 
   function renderLobbyPlayers(players, room) {
@@ -368,148 +371,184 @@
     document.getElementById('my-name').textContent = me[1].name;
     document.getElementById('opp-name').textContent = opponent[1].name;
 
-    // Tipos usados en ronda actual
-    const currentRoundData = room.currentRoundData || {};
-    const myAnswer = currentRoundData[currentUser.uid];
-    const oppAnswer = currentRoundData[opponent[0]];
+    const phase = room.roundPhase || 'type_selection';
+    const roundData = room.currentRoundData || {};
+    const myTypeAnswer = roundData.types?.[currentUser.uid];
+    const oppTypeAnswer = roundData.types?.[opponent[0]];
 
-    document.getElementById('my-type-badge').textContent = myAnswer?.type ? formatType(myAnswer.type) : '?';
-    document.getElementById('my-type-badge').className = `type-badge ${myAnswer?.type || ''}`;
-    document.getElementById('opp-type-badge').textContent = oppAnswer?.type ? formatType(oppAnswer.type) : '?';
-    document.getElementById('opp-type-badge').className = `type-badge ${oppAnswer?.type || ''}`;
+    // Actualizar badges de tipo en los laterales
+    document.getElementById('my-type-badge').textContent = myTypeAnswer ? formatType(myTypeAnswer) : '?';
+    document.getElementById('my-type-badge').className = `type-badge ${myTypeAnswer || ''}`;
+    document.getElementById('opp-type-badge').textContent = oppTypeAnswer ? formatType(oppTypeAnswer) : '?';
+    document.getElementById('opp-type-badge').className = `type-badge ${oppTypeAnswer || ''}`;
 
-    // Pokemon central (si ambos han respondido)
-    if (myAnswer && oppAnswer) {
-      showCentralPokemon(currentRoundData.pokemon, myAnswer.type, oppAnswer.type);
-      document.getElementById('type-input-area').style.display = 'none';
-    } else {
-      document.getElementById('central-pokemon').style.display = 'none';
-      if (!myAnswer) {
-        document.getElementById('type-input-area').style.display = 'flex';
-        hasAnswered = false;
+    // Ocultar todo por defecto
+    document.getElementById('phase-type-selection').style.display = 'none';
+    document.getElementById('phase-no-combo').style.display = 'none';
+    document.getElementById('phase-pokemon-race').style.display = 'none';
+    document.getElementById('combo-display').style.display = 'none';
+
+    myTypesUsed = rounds.map(r => r.typeAnswers?.[currentUser.uid]).filter(Boolean);
+
+    if (phase === 'type_selection') {
+      document.getElementById('phase-type-selection').style.display = 'flex';
+      if (myTypeAnswer) {
+        // Ya elegí, espero al rival
+        document.getElementById('type-select-input').style.display = 'none';
+        document.getElementById('waiting-opponent-type').style.display = 'block';
       } else {
-        document.getElementById('type-input-area').style.display = 'none';
+        document.getElementById('type-select-input').style.display = 'flex';
+        document.getElementById('waiting-opponent-type').style.display = 'none';
+        hasAnsweredType = false;
+      }
+    } else if (phase === 'no_combo') {
+      document.getElementById('phase-no-combo').style.display = 'flex';
+      document.getElementById('no-combo-types').innerHTML =
+        `<span class="type-badge ${roundData.checkedType1}">${formatType(roundData.checkedType1)}</span>
+         <span style="font-size:20px;font-weight:900;color:var(--muted)">+</span>
+         <span class="type-badge ${roundData.checkedType2}">${formatType(roundData.checkedType2)}</span>`;
+    } else if (phase === 'pokemon_race') {
+      // Mostrar combo encima
+      document.getElementById('combo-display').style.display = 'flex';
+      document.getElementById('combo-type1').textContent = formatType(roundData.comboType1);
+      document.getElementById('combo-type1').className = `type-badge big ${roundData.comboType1}`;
+      document.getElementById('combo-type2').textContent = formatType(roundData.comboType2);
+      document.getElementById('combo-type2').className = `type-badge big ${roundData.comboType2}`;
+
+      if (roundData.winner) {
+        // Ronda resuelta
+        document.getElementById('phase-pokemon-race').style.display = 'flex';
+        document.getElementById('pokemon-search-input').disabled = true;
+        const winnerName = roundData.winner === currentUser.uid ? '¡Ganaste esta ronda!' : `${opponent[1].name} ganó esta ronda`;
+        document.getElementById('race-status').textContent = winnerName;
+        document.getElementById('race-status').style.color = roundData.winner === currentUser.uid ? 'var(--accent)' : 'var(--red)';
+        if (roundData.winnerPokemon && POKEMON_TYPES[roundData.winnerPokemon]) {
+          const p = POKEMON_TYPES[roundData.winnerPokemon];
+          document.getElementById('winner-pokemon-sprite').src = p.sprite;
+          document.getElementById('winner-pokemon-name').textContent = p.displayName;
+          document.getElementById('winner-pokemon-display').style.display = 'flex';
+        }
+      } else {
+        document.getElementById('phase-pokemon-race').style.display = 'flex';
+        document.getElementById('pokemon-search-input').disabled = hasAnsweredPokemon;
+        document.getElementById('race-status').textContent = '¡Sé el primero en encontrar un Pokémon!';
+        document.getElementById('race-status').style.color = 'var(--muted)';
+        document.getElementById('winner-pokemon-display').style.display = 'none';
       }
     }
-
-    // Tipos ya usados
-    myTypesUsed = rounds.map(r => r[currentUser.uid]?.type).filter(Boolean);
-
-    // Resultado de ronda
-    if (currentRoundData.resolved) {
-      showRoundResult(currentRoundData, round, room);
-    }
   }
 
-  function showCentralPokemon(pokemonName, type1, type2) {
-    const el = document.getElementById('central-pokemon');
-    el.style.display = 'block';
-    if (pokemonName && POKEMON_TYPES[pokemonName]) {
-      const p = POKEMON_TYPES[pokemonName];
-      document.getElementById('central-sprite').src = p.sprite;
-      document.getElementById('central-name').textContent = p.displayName;
-      const t1 = document.getElementById('central-type1');
-      const t2 = document.getElementById('central-type2');
-      t1.textContent = formatType(p.types[0]);
-      t1.className = `type-badge ${p.types[0]}`;
-      t2.textContent = p.types[1] ? formatType(p.types[1]) : '';
-      t2.style.display = p.types[1] ? 'inline-block' : 'none';
-      if (p.types[1]) t2.className = `type-badge ${p.types[1]}`;
-    }
-  }
-
+  // FASE 1: El jugador elige su tipo
   window.submitType = async () => {
-    if (hasAnswered) return;
-    const input = document.getElementById('pokemon-search').value.trim().toLowerCase();
+    if (hasAnsweredType) return;
+    const type = document.getElementById('selected-type').value;
+    if (!type) return showToast('Selecciona un tipo');
+    if (myTypesUsed.includes(type)) return showToast(`Ya usaste el tipo ${formatType(type)} en una ronda anterior`);
+
+    hasAnsweredType = true;
+    document.getElementById('type-select-input').style.display = 'none';
+    document.getElementById('waiting-opponent-type').style.display = 'block';
+
+    await update(ref(db, `rooms/${currentRoomId}/currentRoundData/types/${currentUser.uid}`), type);
+
+    // Host comprueba si ambos eligieron
+    if (isHost) {
+      await new Promise(r => setTimeout(r, 1500));
+      const snap = await get(ref(db, `rooms/${currentRoomId}`));
+      if (!snap.exists()) return;
+      const room = snap.val();
+      const players = Object.keys(room.players);
+      const types = room.currentRoundData?.types || {};
+      if (players.every(uid => types[uid])) {
+        checkTypeCombo(room, types, players);
+      }
+    }
+  };
+
+  // Host verifica si la combinación de tipos existe
+  async function checkTypeCombo(room, types, players) {
+    const typeValues = Object.values(types);
+    const t1 = typeValues[0];
+    const t2 = typeValues[1];
+
+    // Buscar si existe algún pokemon con exactamente esa combinación (orden no importa)
+    const exists = Object.values(POKEMON_TYPES).some(p => {
+      const pt = p.types;
+      if (pt.length === 1) return (t1 === t2) && pt[0] === t1;
+      return (pt.includes(t1) && pt.includes(t2));
+    });
+
+    if (!exists) {
+      // No existe combo → reiniciar ronda sin contar
+      await update(ref(db, `rooms/${currentRoomId}`), {
+        roundPhase: 'no_combo',
+        'currentRoundData/checkedType1': t1,
+        'currentRoundData/checkedType2': t2,
+      });
+      setTimeout(async () => {
+        await update(ref(db, `rooms/${currentRoomId}`), {
+          roundPhase: 'type_selection',
+          currentRoundData: null
+        });
+      }, 3000);
+    } else {
+      // Existe → pasar a fase de carrera
+      await update(ref(db, `rooms/${currentRoomId}`), {
+        roundPhase: 'pokemon_race',
+        'currentRoundData/comboType1': t1,
+        'currentRoundData/comboType2': t2,
+      });
+    }
+  }
+
+  // FASE 2: El jugador busca el pokemon correcto (carrera)
+  window.submitPokemon = async () => {
+    if (hasAnsweredPokemon) return;
+    const input = document.getElementById('pokemon-search-input').value.trim().toLowerCase();
     const pokemon = POKEMON_TYPES[input];
     if (!pokemon) return showToast('Pokémon no encontrado');
 
-    const type = document.getElementById('selected-type').value;
-    if (!type) return showToast('Selecciona un tipo');
-    if (myTypesUsed.includes(type)) return showToast(`Ya usaste el tipo ${formatType(type)}`);
+    const roundData = currentRoom?.currentRoundData || {};
+    const t1 = roundData.comboType1;
+    const t2 = roundData.comboType2;
 
-    hasAnswered = true;
-    roundAnswerTime = Date.now();
-
-    await update(ref(db, `rooms/${currentRoomId}/currentRoundData/${currentUser.uid}`), {
-      type, pokemon: input, answeredAt: serverTimestamp(), clientTime: roundAnswerTime
-    });
-
-    // Si host, verificar si ambos respondieron
-    if (isHost) checkRoundComplete();
-  };
-
-  async function checkRoundComplete() {
-    await new Promise(r => setTimeout(r, 1000));
-    const snap = await get(ref(db, `rooms/${currentRoomId}`));
-    if (!snap.exists()) return;
-    const room = snap.val();
-    const players = Object.keys(room.players);
-    const roundData = room.currentRoundData || {};
-    if (players.every(uid => roundData[uid])) {
-      resolveRound(room);
-    }
-  }
-
-  async function resolveRound(room) {
-    const players = Object.entries(room.players);
-    const roundData = room.currentRoundData;
-    const round = room.currentRound;
-
-    // Buscar el pokemon que alguien eligió
-    let pokemonName = null;
-    let winnerUid = null;
-
-    for (const [uid, data] of Object.entries(roundData)) {
-      const pokemon = POKEMON_TYPES[data.pokemon];
-      if (!pokemon) continue;
-      pokemonName = data.pokemon;
-
-      // Verificar si el tipo coincide con el pokemon
-      const otherUid = players.find(([u]) => u !== uid)?.[0];
-      const otherData = roundData[otherUid];
-      if (!otherData) continue;
-
-      const pokemonTypes = pokemon.types;
-      const myType = data.type;
-      const oppType = otherData.type;
-
-      // El que haya buscado el pokemon correcto gana
-      if (pokemonTypes.includes(myType) || pokemonTypes.includes(oppType)) {
-        // Gana quien eligió el tipo que coincide con el pokemon
-        // Si ambos coinciden, gana el más rápido
-        const myCorrect = pokemonTypes.includes(myType);
-        const oppCorrect = pokemonTypes.includes(oppType);
-        if (myCorrect && !oppCorrect) winnerUid = uid;
-        else if (!myCorrect && oppCorrect) winnerUid = otherUid;
-        else {
-          // Ambos correctos: gana el más rápido
-          winnerUid = data.clientTime < otherData.clientTime ? uid : otherUid;
-        }
-      }
-      break;
+    // Verificar que el pokemon tiene exactamente esa combinación
+    const pt = pokemon.types;
+    let valid = false;
+    if (pt.length === 1) {
+      valid = (t1 === t2) && pt[0] === t1;
+    } else {
+      valid = pt.includes(t1) && pt.includes(t2);
     }
 
-    // Si nadie eligió pokemon válido, empate (nadie gana ronda)
-    const rounds = [...(room.rounds || []), {
-      round, winner: winnerUid, pokemon: pokemonName, data: roundData
+    if (!valid) return showToast(`${pokemon.displayName} no es ${formatType(t1)}/${formatType(t2)}`);
+
+    hasAnsweredPokemon = true;
+    document.getElementById('pokemon-search-input').disabled = true;
+
+    // Ganó esta ronda
+    const rounds = [...(currentRoom.rounds || []), {
+      round: currentRoom.currentRound,
+      winner: currentUser.uid,
+      typeAnswers: currentRoom.currentRoundData?.types || {},
+      winnerPokemon: input
     }];
 
-    const myWins = rounds.filter(r => r.winner === players[0][0]).length;
-    const oppWins = rounds.filter(r => r.winner === players[1][0]).length;
+    const players = Object.entries(currentRoom.players);
+    const myWins = rounds.filter(r => r.winner === currentUser.uid).length;
+    const oppWins = rounds.filter(r => r.winner !== currentUser.uid && r.winner).length;
 
     let newStatus = 'playing';
     let gameWinner = null;
-    if (myWins >= 3 || oppWins >= 3 || round >= 5) {
+    if (myWins >= 3 || oppWins >= 3 || currentRoom.currentRound >= 5) {
       newStatus = 'finished';
-      gameWinner = myWins > oppWins ? players[0][0] : (oppWins > myWins ? players[1][0] : null);
+      gameWinner = myWins > oppWins ? currentUser.uid : (oppWins > myWins ? players.find(([uid]) => uid !== currentUser.uid)?.[0] : null);
     }
 
     await update(ref(db, `rooms/${currentRoomId}`), {
       rounds,
-      'currentRoundData/resolved': true,
-      'currentRoundData/winner': winnerUid,
-      'currentRoundData/pokemon': pokemonName,
+      'currentRoundData/winner': currentUser.uid,
+      'currentRoundData/winnerPokemon': input,
       status: newStatus,
       gameWinner
     });
@@ -517,14 +556,16 @@
     if (newStatus === 'playing') {
       setTimeout(async () => {
         await update(ref(db, `rooms/${currentRoomId}`), {
-          currentRound: round + 1,
+          currentRound: (currentRoom.currentRound || 1) + 1,
+          roundPhase: 'type_selection',
           currentRoundData: null
         });
+        hasAnsweredPokemon = false;
       }, 3000);
     } else if (newStatus === 'finished') {
-      await updatePoints(room, rounds, players, gameWinner);
+      await updatePoints(currentRoom, rounds, players, gameWinner);
     }
-  }
+  };
 
   async function updatePoints(room, rounds, players, gameWinner) {
     if (room.type !== 'matchmaking') return;
@@ -589,10 +630,9 @@
     showScreen('menu');
   };
 
-  // ===================== POKEMON SEARCH =====================
-  window.searchPokemon = () => {
-    const query = document.getElementById('pokemon-search').value.toLowerCase();
-    const results = document.getElementById('search-results');
+  window.searchPokemon = (inputId) => {
+    const query = (document.getElementById(inputId || 'pokemon-search-input').value || '').toLowerCase();
+    const results = document.getElementById('search-results-race');
     results.innerHTML = '';
     if (query.length < 2) return;
 
@@ -603,15 +643,9 @@
     matches.forEach(p => {
       const div = document.createElement('div');
       div.className = 'search-item';
-      div.innerHTML = `<img src="${p.sprite}" /><span>${p.displayName}</span>
-        ${p.types.map(t => `<span class="type-badge ${t}">${formatType(t)}</span>`).join('')}`;
+      div.innerHTML = `<img src="${p.sprite}" /><span class="search-item-name">${p.displayName}</span>`;
       div.onclick = () => {
-        document.getElementById('pokemon-search').value = p.name;
-        document.getElementById('pokemon-preview').src = p.sprite;
-        document.getElementById('pokemon-preview').style.display = 'block';
-        // Auto-seleccionar tipo si el pokemon tiene un tipo disponible
-        const availableType = p.types.find(t => !myTypesUsed.includes(t));
-        if (availableType) document.getElementById('selected-type').value = availableType;
+        document.getElementById('pokemon-search-input').value = p.name;
         results.innerHTML = '';
       };
       results.appendChild(div);
@@ -686,16 +720,16 @@
     }
   }, 3000);
 
-  // Host timeout check
+  // Host: vigilar que ambos eligieron tipo
   setInterval(async () => {
-    if (currentRoomId && isHost && currentRoom?.status === 'playing') {
+    if (currentRoomId && isHost && currentRoom?.status === 'playing' && currentRoom?.roundPhase === 'type_selection') {
       const snap = await get(ref(db, `rooms/${currentRoomId}`));
       if (!snap.exists()) return;
       const room = snap.val();
-      const roundData = room.currentRoundData || {};
       const players = Object.keys(room.players);
-      if (players.every(uid => roundData[uid] && !roundData.resolved)) {
-        resolveRound(room);
+      const types = room.currentRoundData?.types || {};
+      if (players.every(uid => types[uid])) {
+        checkTypeCombo(room, types, players);
       }
     }
   }, 2000);
