@@ -84,10 +84,18 @@
     return               { name:'GS Ball',      icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/gs-ball.png' };
   }
 
-  function calcPoints(isWinner, roundsWon) {
-    // Ganador: 8-15 | Perdedor: -8 a -15
-    if (isWinner) return Math.round(8 + (roundsWon / 3) * 7);
-    return -Math.round(8 + ((3 - roundsWon) / 3) * 7);
+  function calcPoints(isWinner, myRoundsWon, oppRoundsWon) {
+    if (isWinner) {
+      if (oppRoundsWon === 0) return 15;
+      if (oppRoundsWon === 1) return 13;
+      if (oppRoundsWon === 2) return 10;
+      return 8;
+    } else {
+      if (myRoundsWon === 0) return -15;
+      if (myRoundsWon === 1) return -13;
+      if (myRoundsWon === 2) return -10;
+      return -8;
+    }
   }
 
   // ===================== STATE =====================
@@ -273,6 +281,16 @@
     } else if (room.status==='playing') {
       showScreen('game');
       renderGame(room);
+      // Bot hooks
+      if (isBotGame) {
+        if (room.roundPhase === 'pokemon_race' && !room.currentRoundData?.winner) {
+          const rd = room.currentRoundData||{};
+          if (rd.comboType1 && rd.comboType2) botPlayPokemon(rd.comboType1, rd.comboType2);
+        }
+        if (room.roundPhase === 'type_selection' && !room.currentRoundData?.types?.BOT) {
+          scheduleBotTypeChoice();
+        }
+      }
     } else if (room.status==='finished') {
       showScreen('result');
       renderResult(room);
@@ -521,49 +539,66 @@
   };
 
   async function updatePoints(room, rounds, players, gameWinner) {
-    if (room.type!=='matchmaking') return;
+    if (room.type !== 'matchmaking') return;
     const pointChanges = {};
+    // Calcular puntos de cada jugador
     for (const [uid] of players) {
-      const won = uid===gameWinner;
-      const rw  = rounds.filter(r=>r.winner===uid).length;
-      const pts = calcPoints(won, won ? rw : rw);
+      const won        = uid === gameWinner;
+      const myRW       = rounds.filter(r => r.winner === uid).length;
+      const oppRW      = rounds.filter(r => r.winner !== uid && r.winner).length;
+      const pts        = calcPoints(won, myRW, oppRW);
       pointChanges[uid] = pts;
-      const s = await get(ref(db, `users/${uid}`));
-      if (s.exists()) {
-        const d = s.val();
-        await update(ref(db, `users/${uid}`), {
-          points:  Math.max(0,(d.points||1000)+pts),
-          wins:    (d.wins||0)+(won?1:0),
-          losses:  (d.losses||0)+(!won&&gameWinner?1:0)
-        });
-      }
     }
+    // Guardar pointChanges en Firebase ANTES de actualizar usuarios
+    // para que ambos jugadores puedan leerlo en renderResult
     await update(ref(db, `rooms/${currentRoomId}`), { pointChanges });
+
+    // Solo el host actualiza su propio usuario para evitar doble escritura
+    // Cada cliente actualiza SUS PROPIOS datos al entrar en resultado
   }
 
+  let pointsApplied = false; // evitar doble aplicación
+
   function renderResult(room) {
-    const gw = room.gameWinner;
-    const won = gw===currentUser.uid, draw=!gw;
-    document.getElementById('result-title').textContent = draw?'¡Empate!':(won?'¡Victoria! 🏆':'Derrota 💀');
-    document.getElementById('result-title').className   = draw?'draw':(won?'win':'loss');
-    const rounds  = room.rounds||[];
-    const myWins  = rounds.filter(r=>r.winner===currentUser.uid).length;
-    const oppWins = rounds.filter(r=>r.winner!==currentUser.uid&&r.winner).length;
+    const gw  = room.gameWinner;
+    const won  = gw === currentUser.uid;
+    const draw = !gw;
+    document.getElementById('result-title').textContent = draw ? '¡Empate!' : (won ? '¡Victoria! 🏆' : 'Derrota 💀');
+    document.getElementById('result-title').className   = draw ? 'draw' : (won ? 'win' : 'loss');
+    const rounds  = room.rounds || [];
+    const myWins  = rounds.filter(r => r.winner === currentUser.uid).length;
+    const oppWins = rounds.filter(r => r.winner !== currentUser.uid && r.winner).length;
     document.getElementById('result-score').textContent = `${myWins} - ${oppWins}`;
     const ptsEl = document.getElementById('result-points');
-    if (room.type==='matchmaking' && room.pointChanges) {
+
+    if (room.type === 'matchmaking' && room.pointChanges && !draw) {
       const change = room.pointChanges[currentUser.uid];
-      if (change!==undefined) {
-        ptsEl.textContent   = change>0?`+${change} puntos`:`${change} puntos`;
-        ptsEl.style.color   = change>0?'var(--accent)':'var(--red)';
+      if (change !== undefined) {
+        ptsEl.textContent   = change > 0 ? `+${change} puntos` : `${change} puntos`;
+        ptsEl.style.color   = change > 0 ? 'var(--accent)' : 'var(--red)';
         ptsEl.style.display = 'block';
+
+        // Aplicar puntos y actualizar W/L en Firebase (cada jugador lo hace por sí mismo)
+        if (!pointsApplied) {
+          pointsApplied = true;
+          get(ref(db, `users/${currentUser.uid}`)).then(async s => {
+            if (!s.exists()) return;
+            const d = s.val();
+            await update(ref(db, `users/${currentUser.uid}`), {
+              points: Math.max(0, (d.points || 1000) + change),
+              wins:   (d.wins   || 0) + (won  ? 1 : 0),
+              losses: (d.losses || 0) + (!won && gw ? 1 : 0)
+            });
+            // Refrescar UI del menú
+            const updated = await get(ref(db, `users/${currentUser.uid}`));
+            if (updated.exists()) { currentUserData = updated.val(); updateUserUI(currentUserData); }
+          });
+        }
       }
-      get(ref(db, `users/${currentUser.uid}`)).then(s => {
-        if (s.exists()) { currentUserData=s.val(); updateUserUI(currentUserData); }
-      });
     } else {
       ptsEl.style.display = 'none';
     }
+
     if (room.abandonedBy) {
       document.getElementById('result-abandoned').style.display = 'block';
     }
@@ -572,13 +607,147 @@
   window.leaveRoom = async () => {
     if (roomListener) roomListener();
     if (activityPingInterval) clearInterval(activityPingInterval);
+    stopBot();
+    pointsApplied = false;
     if (currentRoomId) {
       await remove(ref(db, `rooms/${currentRoomId}/players/${currentUser.uid}`));
       if (isHost) await remove(ref(db, `rooms/${currentRoomId}`));
     }
-    currentRoomId=null; currentRoom=null;
+    currentRoomId = null; currentRoom = null;
     showScreen('menu');
   };
+
+  // ===================== BOT SYSTEM =====================
+  const BOT_TRAINERS = [
+    { name:'Ash Ketchum',    rank:1100, baseDelay:18, accuracy:0.65 },
+    { name:'Misty',          rank:1200, baseDelay:15, accuracy:0.72 },
+    { name:'Brock',          rank:1300, baseDelay:13, accuracy:0.78 },
+    { name:'Gary Oak',       rank:1500, baseDelay:10, accuracy:0.85 },
+    { name:'Giovanni',       rank:1700, baseDelay:7,  accuracy:0.92 },
+    { name:'Lance',          rank:1900, baseDelay:5,  accuracy:0.97 },
+    { name:'Red',            rank:2000, baseDelay:3,  accuracy:0.99 },
+  ];
+
+  let botTimeout = null;
+  let isBotGame  = false;
+  let botData    = null;
+  let botTypesUsed = [];
+
+  function stopBot() {
+    if (botTimeout) { clearTimeout(botTimeout); botTimeout = null; }
+    isBotGame = false; botData = null; botTypesUsed = [];
+  }
+
+  window.playVsBot = async () => {
+    // Elegir bot según rango del jugador
+    const myPts = currentUserData?.points || 1000;
+    const candidates = BOT_TRAINERS.filter(b => Math.abs(b.rank - myPts) < 400);
+    const bot = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : BOT_TRAINERS[0];
+
+    const code = 'BOT_' + Math.random().toString(36).substr(2,6).toUpperCase();
+    const myName = currentUser.displayName || 'Jugador';
+    isBotGame = true; botData = bot; botTypesUsed = [];
+
+    await set(ref(db, `rooms/${code}`), {
+      code, type:'matchmaking', isBot: true,
+      status:'preview',
+      players:{
+        [currentUser.uid]: { name:myName, photo:getAvatar(myName), points:myPts, lastActive:Date.now() },
+        'BOT':             { name:bot.name, photo:getAvatar(bot.name), points:bot.rank, lastActive:Date.now(), isBot:true }
+      },
+      rounds:[], currentRound:0,
+      createdAt:serverTimestamp(), lastActivity:serverTimestamp()
+    });
+    currentRoomId = code; isHost = true;
+    listenToRoom(code);
+    setTimeout(async () => {
+      await update(ref(db, `rooms/${code}`), {
+        status:'playing', currentRound:1, roundPhase:'type_selection', lastActivity:serverTimestamp()
+      });
+      scheduleBotTypeChoice();
+    }, 5000);
+  };
+
+  function scheduleBotTypeChoice() {
+    if (!isBotGame || !botData) return;
+    const room = currentRoom;
+    if (!room || room.status !== 'playing' || room.roundPhase !== 'type_selection') return;
+    // Bot elige tipo en X segundos (aleatorio basado en dificultad)
+    const delay = (botData.baseDelay + Math.random() * 8) * 1000;
+    botTimeout = setTimeout(async () => {
+      const snap = await get(ref(db, `rooms/${currentRoomId}`));
+      if (!snap.exists()) return;
+      const r = snap.val();
+      if (r.roundPhase !== 'type_selection' || r.currentRoundData?.types?.BOT) return;
+      // Elegir tipo que no haya usado
+      const usedByBot = (r.rounds||[]).map(rd => rd.typeAnswers?.BOT).filter(Boolean);
+      const allTypes  = ["normal","fire","water","electric","grass","ice","fighting","poison","ground","flying","psychic","bug","rock","ghost","dragon","dark","steel","fairy"];
+      const available = allTypes.filter(t => !usedByBot.includes(t));
+      const botType   = available[Math.floor(Math.random()*available.length)];
+      botTypesUsed.push(botType);
+      await update(ref(db, `rooms/${currentRoomId}/currentRoundData/types`), { BOT: botType });
+      // Disparar check inmediatamente
+      setTimeout(tryCheckTypeCombo, 500);
+    }, delay);
+  }
+
+  async function botPlayPokemon(t1, t2) {
+    if (!isBotGame || !botData) return;
+    // Probabilidad de acertar según dificultad y tiempo transcurrido
+    const willAnswer = Math.random() < botData.accuracy;
+    if (!willAnswer) return; // el bot falla esta ronda
+
+    // Buscar pokémon válido
+    const validPokemon = Object.values(POKEMON_TYPES).filter(p => {
+      const pt = p.types;
+      return pt.length === 1
+        ? (t1 === t2 && pt[0] === t1)
+        : (pt.includes(t1) && pt.includes(t2));
+    });
+    if (!validPokemon.length) return;
+    const chosen = validPokemon[Math.floor(Math.random()*validPokemon.length)];
+
+    // Delay simulando tiempo de reacción
+    const delay = (botData.baseDelay * 0.5 + Math.random() * botData.baseDelay) * 1000;
+    botTimeout = setTimeout(async () => {
+      const snap = await get(ref(db, `rooms/${currentRoomId}`));
+      if (!snap.exists()) return;
+      const room = snap.val();
+      if (room.roundPhase !== 'pokemon_race' || room.currentRoundData?.winner) return;
+
+      // Bot gana la ronda
+      const existingRounds = room.rounds || [];
+      const newRound = { round:room.currentRound, winner:'BOT', typeAnswers:room.currentRoundData?.types||{}, winnerPokemon:chosen.name };
+      const rounds   = [...existingRounds, newRound];
+      const players  = Object.entries(room.players);
+      const myWins   = rounds.filter(r=>r.winner===currentUser.uid).length;
+      const botWins  = rounds.filter(r=>r.winner==='BOT').length;
+      let newStatus = 'playing', gameWinner = null;
+      if (myWins>=3||botWins>=3||room.currentRound>=5) {
+        newStatus = 'finished';
+        gameWinner = myWins > botWins ? currentUser.uid : (botWins > myWins ? 'BOT' : null);
+      }
+      await update(ref(db, `rooms/${currentRoomId}`), {
+        rounds, 'currentRoundData/winner':'BOT', 'currentRoundData/winnerPokemon':chosen.name,
+        status:newStatus, lastActivity:serverTimestamp(),
+        ...(gameWinner!==null?{gameWinner}:{})
+      });
+      if (newStatus==='playing') {
+        setTimeout(async () => {
+          const s = await get(ref(db, `rooms/${currentRoomId}`));
+          if (!s.exists()) return;
+          await update(ref(db, `rooms/${currentRoomId}`), {
+            currentRound:room.currentRound+1, roundPhase:'type_selection',
+            currentRoundData:null, lastActivity:serverTimestamp()
+          });
+          hasAnsweredType=false; hasAnsweredPokemon=false;
+          scheduleBotTypeChoice();
+        }, 3000);
+      } else if (newStatus==='finished') {
+        await updatePoints(room, rounds, players, gameWinner);
+      }
+    }, delay);
+  }
 
   window.searchPokemon = () => {
     const input = document.getElementById('pokemon-search-input');
@@ -882,7 +1051,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 <!-- ===================== LANDING ===================== -->
 <div class="screen active" id="screen-landing">
-  <div class="version-badge">v0.4.0</div>
+  <div class="version-badge">v0.5.0</div>
   <div class="pokeball-hero"></div>
   <div class="logo"><span>PokeType</span><br>Duel<small>¿Cuánto sabes de tipos?</small></div>
   <div class="flex-row">
@@ -932,6 +1101,10 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
     <div class="menu-card" onclick="startMatchmaking()">
       <div class="icon">⚔️</div>
       <div class="text"><h3>Matchmaking</h3><p>Enfréntate a rivales aleatorios · Gana o pierde puntos</p></div>
+    </div>
+    <div class="menu-card" onclick="playVsBot()">
+      <div class="icon">🤖</div>
+      <div class="text"><h3>Vs Entrenador</h3><p>Practica contra un entrenador IA · Con puntos</p></div>
     </div>
   </div>
   <div class="stat-bar w-full">
