@@ -6,15 +6,11 @@
 <title>PokeType Duel</title>
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@400;600;700;900&display=swap" rel="stylesheet">
 
-<!-- Firebase SDKs -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-  import { getDatabase, ref, set, get, push, onValue, update, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+  import { getDatabase, ref, set, get, onValue, update, remove, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-  // ============================================================
-  // 🔧 REEMPLAZA ESTO CON TU CONFIGURACIÓN DE FIREBASE
-  // ============================================================
   const firebaseConfig = {
     apiKey: "AIzaSyCZKjhFu9V688yRWCGlO-VO37HUamWysfw",
     authDomain: "poketype-duel.firebaseapp.com",
@@ -25,22 +21,18 @@
     appId: "1:782442861192:web:701a8d8d4740ddde47853d",
     measurementId: "G-WDSTGBX4VV"
   };
-  // ============================================================
 
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getDatabase(app);
 
   // ===================== POKEMON DATA =====================
-  // Todos los 1025 pokémon con sus tipos (generaciones 1-9)
   const POKEMON_TYPES = {};
 
   async function loadPokemonData() {
     showLoadingOverlay("Cargando Pokédex...");
     try {
-      // Cargamos en batches para no saturar la API
-      const total = 1025;
-      const batchSize = 100;
+      const total = 1025; const batchSize = 100;
       for (let offset = 0; offset < total; offset += batchSize) {
         const limit = Math.min(batchSize, total - offset);
         const res = await fetch(`https://pokeapi.co/api/v2/pokemon?limit=${limit}&offset=${offset}`);
@@ -49,11 +41,10 @@
           const pRes = await fetch(p.url);
           const pData = await pRes.json();
           POKEMON_TYPES[pData.name] = {
-            id: pData.id,
-            name: pData.name,
+            id: pData.id, name: pData.name,
             displayName: pData.name.charAt(0).toUpperCase() + pData.name.slice(1),
             types: pData.types.map(t => t.type.name),
-            sprite: pData.sprites.front_default || pData.sprites.other['official-artwork'].front_default
+            sprite: pData.sprites.front_default || pData.sprites.other?.['official-artwork']?.front_default
           };
         }));
       }
@@ -62,13 +53,11 @@
     } catch (e) {
       hideLoadingOverlay();
       console.error("Error cargando Pokémon:", e);
-      // Fallback: datos básicos hardcodeados para pruebas
       loadFallbackData();
     }
   }
 
   function loadFallbackData() {
-    // Datos de ejemplo mínimos por si falla la API
     const sample = [
       {name:"bulbasaur",types:["grass","poison"]},{name:"charmander",types:["fire"]},
       {name:"squirtle",types:["water"]},{name:"pikachu",types:["electric"]},
@@ -77,78 +66,68 @@
       {name:"lapras",types:["water","ice"]},{name:"eevee",types:["normal"]},
     ];
     sample.forEach(p => {
-      POKEMON_TYPES[p.name] = {
-        id: 0, name: p.name,
-        displayName: p.name.charAt(0).toUpperCase() + p.name.slice(1),
-        types: p.types,
-        sprite: `https://img.pokemondb.net/sprites/home/normal/${p.name}.png`
-      };
+      POKEMON_TYPES[p.name] = { id:0, name:p.name, displayName:p.name.charAt(0).toUpperCase()+p.name.slice(1), types:p.types, sprite:`https://img.pokemondb.net/sprites/home/normal/${p.name}.png` };
     });
   }
 
-  const TYPES = ["normal","fire","water","electric","grass","ice","fighting","poison",
-    "ground","flying","psychic","bug","rock","ghost","dragon","dark","steel","fairy"];
+  const TYPES = ["normal","fire","water","electric","grass","ice","fighting","poison","ground","flying","psychic","bug","rock","ghost","dragon","dark","steel","fairy"];
 
-  const TYPE_COLORS = {
-    normal:"#A8A878",fire:"#F08030",water:"#6890F0",electric:"#F8D030",
-    grass:"#78C850",ice:"#98D8D8",fighting:"#C03028",poison:"#A040A0",
-    ground:"#E0C068",flying:"#A890F0",psychic:"#F85888",bug:"#A8B820",
-    rock:"#B8A038",ghost:"#705898",dragon:"#7038F8",dark:"#705848",
-    steel:"#B8B8D0",fairy:"#EE99AC"
-  };
+  // ===================== RANGOS =====================
+  function getRank(points) {
+    const p = points || 1000;
+    if (p < 800)  return { name:'Safari Ball',  icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/safari-ball.png' };
+    if (p < 1100) return { name:'Poké Ball',    icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png' };
+    if (p < 1300) return { name:'Super Ball',   icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/great-ball.png' };
+    if (p < 1500) return { name:'Ultra Ball',   icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/ultra-ball.png' };
+    if (p < 1700) return { name:'Ente Ball',    icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/premier-ball.png' };
+    if (p < 2000) return { name:'Master Ball',  icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/master-ball.png' };
+    return               { name:'GS Ball',      icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/gs-ball.png' };
+  }
+
+  function calcPoints(isWinner, roundsWon) {
+    // Ganador: 8-15 | Perdedor: -8 a -15
+    if (isWinner) return Math.round(8 + (roundsWon / 3) * 7);
+    return -Math.round(8 + ((3 - roundsWon) / 3) * 7);
+  }
 
   // ===================== STATE =====================
   let currentUser = null;
+  let currentUserData = null;
   let currentRoom = null;
   let currentRoomId = null;
   let roomListener = null;
   let matchmakingListener = null;
   let isHost = false;
+  let activityPingInterval = null;
 
   // ===================== AUTH =====================
   window.registerWithEmail = async () => {
     const username = document.getElementById('reg-username').value.trim();
-    const email = document.getElementById('reg-email').value.trim();
+    const email    = document.getElementById('reg-email').value.trim();
     const password = document.getElementById('reg-password').value;
-    if (!username || !email || !password) return showToast('Rellena todos los campos');
-    if (password.length < 6) return showToast('Mínimo 6 caracteres en la contraseña');
+    if (!username||!email||!password) return showToast('Rellena todos los campos');
+    if (password.length < 6) return showToast('Mínimo 6 caracteres');
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(result.user, { displayName: username });
-      await set(ref(db, `users/${result.user.uid}`), {
-        displayName: username,
-        photoURL: null,
-        points: 1000,
-        wins: 0,
-        losses: 0,
-        createdAt: serverTimestamp()
-      });
+      await set(ref(db, `users/${result.user.uid}`), { displayName: username, points:1000, wins:0, losses:0, createdAt: serverTimestamp() });
       document.getElementById('auth-modal').classList.remove('open');
-    } catch (e) {
-      const msgs = {
-        'auth/email-already-in-use': 'Ese correo ya está registrado',
-        'auth/invalid-email': 'Correo no válido',
-        'auth/weak-password': 'Contraseña muy débil'
-      };
-      showToast(msgs[e.code] || 'Error al registrarse');
+    } catch(e) {
+      const msgs = {'auth/email-already-in-use':'Correo ya registrado','auth/invalid-email':'Correo no válido','auth/weak-password':'Contraseña débil'};
+      showToast(msgs[e.code]||'Error al registrarse');
     }
   };
 
   window.loginWithEmail = async () => {
-    const email = document.getElementById('login-email').value.trim();
+    const email    = document.getElementById('login-email').value.trim();
     const password = document.getElementById('login-password').value;
-    if (!email || !password) return showToast('Rellena todos los campos');
+    if (!email||!password) return showToast('Rellena todos los campos');
     try {
       await signInWithEmailAndPassword(auth, email, password);
       document.getElementById('auth-modal').classList.remove('open');
-    } catch (e) {
-      const msgs = {
-        'auth/user-not-found': 'Usuario no encontrado',
-        'auth/wrong-password': 'Contraseña incorrecta',
-        'auth/invalid-credential': 'Credenciales incorrectas',
-        'auth/invalid-email': 'Correo no válido'
-      };
-      showToast(msgs[e.code] || 'Error al iniciar sesión');
+    } catch(e) {
+      const msgs = {'auth/user-not-found':'Usuario no encontrado','auth/wrong-password':'Contraseña incorrecta','auth/invalid-credential':'Credenciales incorrectas'};
+      showToast(msgs[e.code]||'Error al iniciar sesión');
     }
   };
 
@@ -162,49 +141,42 @@
     if (user) {
       currentUser = user;
       const snap = await get(ref(db, `users/${user.uid}`));
-      if (snap.exists()) {
-        const data = snap.val();
-        updateUserUI(data);
-      }
+      if (snap.exists()) { currentUserData = snap.val(); updateUserUI(currentUserData); }
       showScreen('menu');
     } else {
-      currentUser = null;
+      currentUser = null; currentUserData = null;
       showScreen('landing');
     }
   });
 
   function updateUserUI(data) {
-    const name = data.displayName || currentUser.displayName || 'Jugador';
+    const name = data.displayName || currentUser?.displayName || 'Jugador';
+    const pts  = data.points || 1000;
+    const rank = getRank(pts);
     document.querySelectorAll('.user-name').forEach(el => el.textContent = name);
-    document.querySelectorAll('.user-points').forEach(el => el.textContent = data.points || 1000);
-    document.querySelectorAll('.user-avatar').forEach(el => {
-      el.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=3b4cca&color=ffde00&bold=true`;
-    });
-    document.querySelectorAll('.user-wins').forEach(el => el.textContent = data.wins || 0);
-    document.querySelectorAll('.user-losses').forEach(el => el.textContent = data.losses || 0);
+    document.querySelectorAll('.user-points').forEach(el => el.textContent = pts);
+    document.querySelectorAll('.user-rank-icon').forEach(el => { el.src = rank.icon; el.title = rank.name; });
+    document.querySelectorAll('.user-avatar').forEach(el => el.src = getAvatar(name));
+    document.querySelectorAll('.user-wins').forEach(el => el.textContent = data.wins||0);
+    document.querySelectorAll('.user-losses').forEach(el => el.textContent = data.losses||0);
   }
 
-  function getUserAvatar(name) {
-    return `https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'U')}&background=3b4cca&color=ffde00&bold=true`;
+  function getAvatar(name) {
+    return `https://ui-avatars.com/api/?name=${encodeURIComponent(name||'U')}&background=3b4cca&color=ffde00&bold=true`;
   }
+
+  // ===================== ROOMS =====================
   window.createPrivateRoom = async () => {
     const code = Math.random().toString(36).substr(2,6).toUpperCase();
-    const roomRef = ref(db, `rooms/${code}`);
-    const myName = currentUser.displayName || 'Jugador';
-    const myPhoto = getUserAvatar(myName);
-    await set(roomRef, {
-      code,
-      type: 'private',
-      host: currentUser.uid,
-      hostName: myName,
-      hostPhoto: myPhoto,
-      status: 'waiting',
-      players: { [currentUser.uid]: { name: myName, photo: myPhoto, ready: false } },
-      rounds: [], currentRound: 0, scores: { [currentUser.uid]: 0 },
-      createdAt: serverTimestamp()
+    const myName = currentUser.displayName||'Jugador';
+    await set(ref(db, `rooms/${code}`), {
+      code, type:'private', host: currentUser.uid,
+      status:'waiting',
+      players:{ [currentUser.uid]:{ name:myName, photo:getAvatar(myName), points:currentUserData?.points||1000, lastActive:Date.now() } },
+      rounds:[], currentRound:0,
+      createdAt: serverTimestamp(), lastActivity: serverTimestamp()
     });
-    currentRoomId = code;
-    isHost = true;
+    currentRoomId = code; isHost = true;
     listenToRoom(code);
     showScreen('lobby');
     document.getElementById('room-code-display').textContent = code;
@@ -214,20 +186,14 @@
   window.joinPrivateRoom = async () => {
     const code = document.getElementById('join-code-input').value.trim().toUpperCase();
     if (!code) return showToast('Introduce un código');
-    const roomRef = ref(db, `rooms/${code}`);
-    const snap = await get(roomRef);
+    const snap = await get(ref(db, `rooms/${code}`));
     if (!snap.exists()) return showToast('Sala no encontrada');
     const room = snap.val();
     if (room.status !== 'waiting') return showToast('La partida ya comenzó');
-    if (Object.keys(room.players || {}).length >= 2) return showToast('Sala llena');
-    const myName = currentUser.displayName || 'Jugador';
-    await update(ref(db, `rooms/${code}/players/${currentUser.uid}`), {
-      name: myName, photo: getUserAvatar(myName), ready: false
-    });
-    await update(ref(db, `rooms/${code}/scores`), { [currentUser.uid]: 0 });
-
-    currentRoomId = code;
-    isHost = false;
+    if (Object.keys(room.players||{}).length >= 2) return showToast('Sala llena');
+    const myName = currentUser.displayName||'Jugador';
+    await update(ref(db, `rooms/${code}/players/${currentUser.uid}`), { name:myName, photo:getAvatar(myName), points:currentUserData?.points||1000, lastActive:Date.now() });
+    currentRoomId = code; isHost = false;
     listenToRoom(code);
     showScreen('lobby');
     document.getElementById('room-code-display').textContent = code;
@@ -236,53 +202,45 @@
 
   window.startMatchmaking = async () => {
     showScreen('matchmaking');
-    const queueRef = ref(db, 'matchmaking/queue');
-    const snap = await get(queueRef);
-    const queue = snap.val() || {};
+    const snap = await get(ref(db, 'matchmaking/queue'));
+    const queue = snap.val()||{};
     const waiting = Object.entries(queue).find(([uid]) => uid !== currentUser.uid);
+    const myName = currentUser.displayName||'Jugador';
 
     if (waiting) {
       const [opponentUid, opponentData] = waiting;
       await remove(ref(db, `matchmaking/queue/${opponentUid}`));
       const code = 'MM_' + Math.random().toString(36).substr(2,6).toUpperCase();
-      const roomRef = ref(db, `rooms/${code}`);
-      const myName = currentUser.displayName || 'Jugador';
-      await set(roomRef, {
-        code, type: 'matchmaking',
-        host: currentUser.uid, hostName: myName, hostPhoto: getUserAvatar(myName),
-        status: 'waiting',
-        players: {
-          [currentUser.uid]: { name: myName, photo: getUserAvatar(myName), ready: false },
-          [opponentUid]: { name: opponentData.name, photo: opponentData.photo, ready: false }
+      await set(ref(db, `rooms/${code}`), {
+        code, type:'matchmaking',
+        status:'preview',
+        players:{
+          [currentUser.uid]:{ name:myName, photo:getAvatar(myName), points:currentUserData?.points||1000, lastActive:Date.now() },
+          [opponentUid]:{ name:opponentData.name, photo:opponentData.photo, points:opponentData.points||1000, lastActive:Date.now() }
         },
-        rounds: [], currentRound: 0,
-        scores: { [currentUser.uid]: 0, [opponentUid]: 0 },
-        createdAt: serverTimestamp()
+        rounds:[], currentRound:0,
+        createdAt:serverTimestamp(), lastActivity:serverTimestamp()
       });
-      currentRoomId = code;
-      isHost = true;
+      currentRoomId = code; isHost = true;
       listenToRoom(code);
+      // Iniciar en 5s
+      setTimeout(async () => {
+        const s = await get(ref(db, `rooms/${code}`));
+        if (!s.exists() || s.val().status !== 'preview') return;
+        await update(ref(db, `rooms/${code}`), { status:'playing', currentRound:1, roundPhase:'type_selection', lastActivity:serverTimestamp() });
+      }, 5000);
     } else {
-      const myName = currentUser.displayName || 'Jugador';
-      await set(ref(db, `matchmaking/queue/${currentUser.uid}`), {
-        name: myName, photo: getUserAvatar(myName), joinedAt: serverTimestamp()
-      });
-      matchmakingListener = onValue(ref(db, 'matchmaking'), async (snap) => {
-        const rooms = Object.entries(snap.val()?.rooms_for_me || {});
-        // Buscamos si nos asignaron sala
-        const allRooms = await get(ref(db, 'rooms'));
-        if (allRooms.exists()) {
-          const roomsData = allRooms.val();
-          const myRoom = Object.entries(roomsData).find(([id, r]) =>
-            r.type === 'matchmaking' && r.players?.[currentUser.uid] && r.status === 'waiting'
-          );
-          if (myRoom) {
-            if (matchmakingListener) matchmakingListener();
-            await remove(ref(db, `matchmaking/queue/${currentUser.uid}`));
-            currentRoomId = myRoom[0];
-            isHost = false;
-            listenToRoom(myRoom[0]);
-          }
+      await set(ref(db, `matchmaking/queue/${currentUser.uid}`), { name:myName, photo:getAvatar(myName), points:currentUserData?.points||1000, joinedAt:serverTimestamp() });
+      matchmakingListener = onValue(ref(db, 'rooms'), (snap) => {
+        if (!snap.exists()) return;
+        const myRoom = Object.entries(snap.val()).find(([id, r]) =>
+          r.type==='matchmaking' && r.players?.[currentUser.uid] && (r.status==='preview'||r.status==='playing')
+        );
+        if (myRoom) {
+          if (matchmakingListener) matchmakingListener();
+          remove(ref(db, `matchmaking/queue/${currentUser.uid}`));
+          currentRoomId = myRoom[0]; isHost = false;
+          listenToRoom(myRoom[0]);
         }
       });
     }
@@ -304,35 +262,45 @@
   }
 
   function handleRoomUpdate(room) {
-    const players = Object.entries(room.players || {});
-
-    if (room.status === 'waiting') {
+    const players = Object.entries(room.players||{});
+    if (room.status==='preview') {
+      showScreen('matchmaking-preview');
+      renderPreview(room, players);
+    } else if (room.status==='waiting') {
       showScreen('lobby');
       document.getElementById('room-code-display').textContent = room.code;
       renderLobbyPlayers(players, room);
-    } else if (room.status === 'playing') {
+    } else if (room.status==='playing') {
       showScreen('game');
       renderGame(room);
-    } else if (room.status === 'finished') {
+    } else if (room.status==='finished') {
       showScreen('result');
       renderResult(room);
     }
   }
 
+  function renderPreview(room, players) {
+    if (players.length < 2) return;
+    const me  = players.find(([uid]) => uid === currentUser.uid);
+    const opp = players.find(([uid]) => uid !== currentUser.uid);
+    if (!me||!opp) return;
+    document.getElementById('preview-my-name').textContent    = me[1].name;
+    document.getElementById('preview-my-avatar').src          = me[1].photo||getAvatar(me[1].name);
+    document.getElementById('preview-my-pts').textContent     = `⭐ ${me[1].points||1000}`;
+    document.getElementById('preview-my-rank').src            = getRank(me[1].points||1000).icon;
+    document.getElementById('preview-opp-name').textContent   = opp[1].name;
+    document.getElementById('preview-opp-avatar').src         = opp[1].photo||getAvatar(opp[1].name);
+    document.getElementById('preview-opp-pts').textContent    = `⭐ ${opp[1].points||1000}`;
+    document.getElementById('preview-opp-rank').src           = getRank(opp[1].points||1000).icon;
+  }
+
   window.startGame = async () => {
     if (!isHost) return;
-    const players = Object.keys(currentRoom.players);
-    if (players.length < 2) return showToast('Necesitas 2 jugadores');
-    await update(ref(db, `rooms/${currentRoomId}`), {
-      status: 'playing', currentRound: 1,
-      roundPhase: 'type_selection',
-      roundStartTime: serverTimestamp(),
-      rounds: []
-    });
+    if (Object.keys(currentRoom.players||{}).length < 2) return showToast('Necesitas 2 jugadores');
+    await update(ref(db, `rooms/${currentRoomId}`), { status:'playing', currentRound:1, roundPhase:'type_selection', lastActivity:serverTimestamp() });
   };
 
   // ===================== GAME LOGIC =====================
-  // roundPhase: 'type_selection' | 'no_combo' | 'pokemon_race'
   let myTypesUsed = [];
   let hasAnsweredType = false;
   let hasAnsweredPokemon = false;
@@ -343,959 +311,567 @@
     players.forEach(([uid, p]) => {
       const div = document.createElement('div');
       div.className = 'lobby-player';
-      div.innerHTML = `<img src="${p.photo || `https://ui-avatars.com/api/?name=${p.name}`}" />
-        <span>${p.name}</span>${uid === room.host ? '<span class="host-badge">HOST</span>' : ''}`;
+      div.innerHTML = `<img src="${p.photo||getAvatar(p.name)}" /><span>${p.name}</span>${uid===room.host?'<span class="host-badge">HOST</span>':''}`;
       container.appendChild(div);
     });
-    const startBtn = document.getElementById('start-game-btn');
-    if (startBtn) startBtn.style.display = isHost && players.length === 2 ? 'block' : 'none';
+    const btn = document.getElementById('start-game-btn');
+    if (btn) btn.style.display = isHost && players.length===2 ? 'block' : 'none';
   }
 
   function renderGame(room) {
-    const players = Object.entries(room.players);
-    const me = players.find(([uid]) => uid === currentUser.uid);
+    const players  = Object.entries(room.players);
+    const me       = players.find(([uid]) => uid === currentUser.uid);
     const opponent = players.find(([uid]) => uid !== currentUser.uid);
-    if (!me || !opponent) return;
+    if (!me||!opponent) return;
 
-    const round = room.currentRound || 1;
-    const rounds = room.rounds || [];
-    const myWins = rounds.filter(r => r.winner === currentUser.uid).length;
-    const oppWins = rounds.filter(r => r.winner === opponent[0]).length;
+    const round  = room.currentRound||1;
+    const rounds = room.rounds||[];
+    const myWins  = rounds.filter(r => r.winner===currentUser.uid).length;
+    const oppWins = rounds.filter(r => r.winner===opponent[0]).length;
 
     document.getElementById('game-round').textContent = `Ronda ${round}/5`;
-    document.getElementById('my-wins').textContent = myWins;
+    document.getElementById('my-wins').textContent  = myWins;
     document.getElementById('opp-wins').textContent = oppWins;
-    document.getElementById('my-avatar').src = me[1].photo || '';
-    document.getElementById('opp-avatar').src = opponent[1].photo || '';
-    document.getElementById('my-name').textContent = me[1].name;
+    document.getElementById('my-avatar').src   = me[1].photo||'';
+    document.getElementById('opp-avatar').src  = opponent[1].photo||'';
+    document.getElementById('my-name').textContent  = me[1].name;
     document.getElementById('opp-name').textContent = opponent[1].name;
+    document.getElementById('my-pts-ingame').textContent  = `⭐ ${me[1].points||1000}`;
+    document.getElementById('opp-pts-ingame').textContent = `⭐ ${opponent[1].points||1000}`;
+    document.getElementById('my-rank-ingame').src  = getRank(me[1].points||1000).icon;
+    document.getElementById('opp-rank-ingame').src = getRank(opponent[1].points||1000).icon;
 
-    const phase = room.roundPhase || 'type_selection';
-    const roundData = room.currentRoundData || {};
-    const myTypeAnswer = roundData.types?.[currentUser.uid];
-    const oppTypeAnswer = roundData.types?.[opponent[0]];
+    const phase     = room.roundPhase||'type_selection';
+    const roundData = room.currentRoundData||{};
+    // Solo revelar tipos cuando ambos han elegido (simultáneo)
+    const revealed     = roundData.revealed;
+    const myTypeBadge  = revealed ? roundData.types?.[currentUser.uid] : null;
+    const oppTypeBadge = revealed ? roundData.types?.[opponent[0]]     : null;
 
-    // Badges laterales
-    document.getElementById('my-type-badge').textContent = myTypeAnswer ? formatType(myTypeAnswer) : '?';
-    document.getElementById('my-type-badge').className = `type-badge ${myTypeAnswer || ''}`;
-    document.getElementById('opp-type-badge').textContent = oppTypeAnswer ? formatType(oppTypeAnswer) : '?';
-    document.getElementById('opp-type-badge').className = `type-badge ${oppTypeAnswer || ''}`;
+    document.getElementById('my-type-badge').textContent  = myTypeBadge  ? formatType(myTypeBadge)  : '?';
+    document.getElementById('my-type-badge').className    = `type-badge ${myTypeBadge||''}`;
+    document.getElementById('opp-type-badge').textContent = oppTypeBadge ? formatType(oppTypeBadge) : '?';
+    document.getElementById('opp-type-badge').className   = `type-badge ${oppTypeBadge||''}`;
 
-    // Ocultar todo
-    document.getElementById('phase-type-selection').style.display = 'none';
-    document.getElementById('phase-no-combo').style.display = 'none';
-    document.getElementById('phase-pokemon-race').style.display = 'none';
+    // Ocultar todas las fases
+    ['phase-type-selection','phase-no-combo','phase-pokemon-race'].forEach(id => document.getElementById(id).style.display='none');
     document.getElementById('combo-display').style.display = 'none';
 
     myTypesUsed = rounds.map(r => r.typeAnswers?.[currentUser.uid]).filter(Boolean);
 
-    if (phase === 'type_selection') {
+    if (phase==='type_selection') {
       document.getElementById('phase-type-selection').style.display = 'flex';
-      if (myTypeAnswer) {
-        document.getElementById('type-select-input').style.display = 'none';
+      const mySecret = roundData.types?.[currentUser.uid];
+      if (mySecret) {
+        document.getElementById('type-select-input').style.display    = 'none';
         document.getElementById('waiting-opponent-type').style.display = 'block';
       } else {
-        document.getElementById('type-select-input').style.display = 'flex';
+        document.getElementById('type-select-input').style.display    = 'flex';
         document.getElementById('waiting-opponent-type').style.display = 'none';
         hasAnsweredType = false;
       }
 
-    } else if (phase === 'no_combo') {
+    } else if (phase==='no_combo') {
       document.getElementById('phase-no-combo').style.display = 'flex';
       document.getElementById('no-combo-types').innerHTML =
         `<span class="type-badge ${roundData.checkedType1}">${formatType(roundData.checkedType1)}</span>
          <span style="font-size:20px;font-weight:900;color:var(--muted)">+</span>
          <span class="type-badge ${roundData.checkedType2}">${formatType(roundData.checkedType2)}</span>`;
 
-    } else if (phase === 'pokemon_race') {
+    } else if (phase==='pokemon_race') {
       document.getElementById('combo-display').style.display = 'flex';
       document.getElementById('combo-type1').textContent = formatType(roundData.comboType1);
-      document.getElementById('combo-type1').className = `type-badge big ${roundData.comboType1}`;
+      document.getElementById('combo-type1').className   = `type-badge big ${roundData.comboType1}`;
       document.getElementById('combo-type2').textContent = formatType(roundData.comboType2);
-      document.getElementById('combo-type2').className = `type-badge big ${roundData.comboType2}`;
+      document.getElementById('combo-type2').className   = `type-badge big ${roundData.comboType2}`;
       document.getElementById('phase-pokemon-race').style.display = 'flex';
 
       if (roundData.winner) {
-        // Ronda resuelta — mostrar resultado
         document.getElementById('pokemon-search-input').disabled = true;
-        document.getElementById('race-submit-btn').disabled = true;
-        const winnerName = roundData.winner === currentUser.uid ? '¡Ganaste esta ronda! 🏆' : `${opponent[1].name} ganó esta ronda`;
-        document.getElementById('race-status').textContent = winnerName;
-        document.getElementById('race-status').style.color = roundData.winner === currentUser.uid ? 'var(--accent)' : 'var(--red)';
+        document.getElementById('race-submit-btn').disabled      = true;
+        const wonRound = roundData.winner === currentUser.uid;
+        document.getElementById('race-status').textContent = wonRound ? '¡Ganaste esta ronda! 🏆' : `${opponent[1].name} ganó esta ronda`;
+        document.getElementById('race-status').style.color = wonRound ? 'var(--accent)' : 'var(--red)';
         if (roundData.winnerPokemon && POKEMON_TYPES[roundData.winnerPokemon]) {
           const p = POKEMON_TYPES[roundData.winnerPokemon];
-          document.getElementById('winner-pokemon-sprite').src = p.sprite;
+          document.getElementById('winner-pokemon-sprite').src       = p.sprite;
           document.getElementById('winner-pokemon-name').textContent = p.displayName;
           document.getElementById('winner-pokemon-display').style.display = 'flex';
         }
       } else {
-        // En carrera
         document.getElementById('pokemon-search-input').disabled = hasAnsweredPokemon;
-        document.getElementById('race-submit-btn').disabled = hasAnsweredPokemon;
-        document.getElementById('race-status').textContent = '⚡ ¡Sé el primero en encontrar un Pokémon!';
-        document.getElementById('race-status').style.color = 'var(--white)';
+        document.getElementById('race-submit-btn').disabled      = hasAnsweredPokemon;
+        document.getElementById('race-status').textContent       = '⚡ ¡Sé el primero en encontrar un Pokémon!';
+        document.getElementById('race-status').style.color       = 'var(--white)';
         document.getElementById('winner-pokemon-display').style.display = 'none';
         if (!hasAnsweredPokemon) document.getElementById('pokemon-search-input').focus();
       }
     }
   }
 
-  // FASE 1: jugador elige tipo
+  // FASE 1: elegir tipo en secreto
   window.submitType = async () => {
     if (hasAnsweredType) return;
     const type = document.getElementById('selected-type').value;
     if (!type) return showToast('Selecciona un tipo');
-    if (myTypesUsed.includes(type)) return showToast(`Ya usaste ${formatType(type)} en una ronda anterior`);
-
+    if (myTypesUsed.includes(type)) return showToast(`Ya usaste ${formatType(type)} antes`);
     hasAnsweredType = true;
-
-    // Escribir tipo con protección contra sobreescritura
-    await update(ref(db, `rooms/${currentRoomId}/currentRoundData/types`), {
-      [currentUser.uid]: type
-    });
-
-    // El host es el árbitro: espera un momento y comprueba si ambos han elegido
-    if (isHost) {
-      setTimeout(tryCheckTypeCombo, 2000);
-    }
+    await update(ref(db, `rooms/${currentRoomId}/currentRoundData/types`), { [currentUser.uid]: type });
+    await update(ref(db, `rooms/${currentRoomId}`), { lastActivity: serverTimestamp() });
+    if (isHost) setTimeout(tryCheckTypeCombo, 2000);
   };
 
-  // El host intenta comprobar el combo (puede llamarse múltiples veces, es idempotente)
   async function tryCheckTypeCombo() {
     const snap = await get(ref(db, `rooms/${currentRoomId}`));
     if (!snap.exists()) return;
     const room = snap.val();
-    if (room.roundPhase !== 'type_selection') return; // Ya lo procesamos
+    if (room.roundPhase !== 'type_selection') return;
     const players = Object.keys(room.players);
-    const types = room.currentRoundData?.types || {};
-    if (!players.every(uid => types[uid])) return; // Aún falta alguno
+    const types   = room.currentRoundData?.types||{};
+    if (!players.every(uid => types[uid])) return;
+    if (room.currentRoundData?.revealed) return; // ya revelado
+    await update(ref(db, `rooms/${currentRoomId}/currentRoundData`), { revealed: true });
     await checkTypeCombo(types);
   }
 
   async function checkTypeCombo(types) {
-    const typeValues = Object.values(types);
-    const t1 = typeValues[0];
-    const t2 = typeValues[1];
-
+    const vals = Object.values(types); const t1=vals[0]; const t2=vals[1];
     const exists = Object.values(POKEMON_TYPES).some(p => {
       const pt = p.types;
-      if (pt.length === 1) return t1 === t2 && pt[0] === t1;
-      return (pt.includes(t1) && pt.includes(t2)) || (pt.includes(t2) && pt.includes(t1));
+      return pt.length===1 ? (t1===t2 && pt[0]===t1) : (pt.includes(t1) && pt.includes(t2));
     });
-
     if (!exists) {
       await update(ref(db, `rooms/${currentRoomId}`), {
-        roundPhase: 'no_combo',
-        'currentRoundData/checkedType1': t1,
-        'currentRoundData/checkedType2': t2,
+        roundPhase:'no_combo', 'currentRoundData/checkedType1':t1, 'currentRoundData/checkedType2':t2, lastActivity:serverTimestamp()
       });
       setTimeout(async () => {
         const s = await get(ref(db, `rooms/${currentRoomId}`));
-        if (!s.exists() || s.val().roundPhase !== 'no_combo') return;
-        await update(ref(db, `rooms/${currentRoomId}`), {
-          roundPhase: 'type_selection',
-          currentRoundData: null
-        });
+        if (!s.exists()||s.val().roundPhase!=='no_combo') return;
+        await update(ref(db, `rooms/${currentRoomId}`), { roundPhase:'type_selection', currentRoundData:null, lastActivity:serverTimestamp() });
         hasAnsweredType = false;
       }, 3000);
     } else {
       await update(ref(db, `rooms/${currentRoomId}`), {
-        roundPhase: 'pokemon_race',
-        'currentRoundData/comboType1': t1,
-        'currentRoundData/comboType2': t2,
+        roundPhase:'pokemon_race', 'currentRoundData/comboType1':t1, 'currentRoundData/comboType2':t2, lastActivity:serverTimestamp()
       });
       hasAnsweredPokemon = false;
+      // Limpiar buscador al entrar en carrera
+      setTimeout(() => {
+        const inp = document.getElementById('pokemon-search-input');
+        if (inp) { inp.value=''; inp.disabled=false; }
+        const res = document.getElementById('search-results-race');
+        if (res) res.innerHTML='';
+      }, 100);
     }
   }
 
-  // FASE 2: carrera — el primero en encontrar el pokemon correcto gana la ronda
+  // FASE 2: carrera pokémon
   window.submitPokemon = async () => {
     if (hasAnsweredPokemon) return;
-
-    // Releer sala para tener el estado más reciente y evitar condiciones de carrera
     const snap = await get(ref(db, `rooms/${currentRoomId}`));
     if (!snap.exists()) return;
     const room = snap.val();
-    if (room.roundPhase !== 'pokemon_race') return;
-    if (room.currentRoundData?.winner) return; // Alguien ya ganó esta ronda
+    if (room.roundPhase!=='pokemon_race' || room.currentRoundData?.winner) return;
 
-    const input = document.getElementById('pokemon-search-input').value.trim().toLowerCase();
+    const input   = document.getElementById('pokemon-search-input').value.trim().toLowerCase();
     const pokemon = POKEMON_TYPES[input];
     if (!pokemon) return showToast('Pokémon no encontrado, escríbelo exactamente');
 
-    const t1 = room.currentRoundData.comboType1;
-    const t2 = room.currentRoundData.comboType2;
-    const pt = pokemon.types;
-
-    let valid = false;
-    if (pt.length === 1) {
-      valid = t1 === t2 && pt[0] === t1;
-    } else {
-      valid = (pt.includes(t1) && pt.includes(t2));
-    }
-
+    const t1=room.currentRoundData.comboType1, t2=room.currentRoundData.comboType2;
+    const pt=pokemon.types;
+    const valid = pt.length===1 ? (t1===t2&&pt[0]===t1) : (pt.includes(t1)&&pt.includes(t2));
     if (!valid) return showToast(`${pokemon.displayName} no tiene los tipos ${formatType(t1)} y ${formatType(t2)}`);
 
     hasAnsweredPokemon = true;
     document.getElementById('pokemon-search-input').disabled = true;
-    document.getElementById('race-submit-btn').disabled = true;
+    document.getElementById('race-submit-btn').disabled      = true;
 
-    // Registrar ganador de la ronda
-    const existingRounds = room.rounds || [];
-    const newRound = {
-      round: room.currentRound,
-      winner: currentUser.uid,
-      typeAnswers: room.currentRoundData?.types || {},
-      winnerPokemon: input
-    };
-    const rounds = [...existingRounds, newRound];
-
-    const players = Object.entries(room.players);
-    const myWins = rounds.filter(r => r.winner === currentUser.uid).length;
-    const oppWins = rounds.filter(r => r.winner !== currentUser.uid && r.winner).length;
-
-    let newStatus = 'playing';
-    let gameWinner = null;
-    if (myWins >= 3 || oppWins >= 3 || room.currentRound >= 5) {
-      newStatus = 'finished';
-      gameWinner = myWins > oppWins
-        ? currentUser.uid
-        : (oppWins > myWins ? players.find(([uid]) => uid !== currentUser.uid)?.[0] : null);
+    const existingRounds = room.rounds||[];
+    const newRound = { round:room.currentRound, winner:currentUser.uid, typeAnswers:room.currentRoundData?.types||{}, winnerPokemon:input };
+    const rounds   = [...existingRounds, newRound];
+    const players  = Object.entries(room.players);
+    const myWins   = rounds.filter(r=>r.winner===currentUser.uid).length;
+    const oppWins  = rounds.filter(r=>r.winner!==currentUser.uid&&r.winner).length;
+    let newStatus='playing', gameWinner=null;
+    if (myWins>=3||oppWins>=3||room.currentRound>=5) {
+      newStatus='finished';
+      const oppUid = players.find(([uid])=>uid!==currentUser.uid)?.[0];
+      gameWinner   = myWins>oppWins ? currentUser.uid : (oppWins>myWins ? oppUid : null);
     }
 
     await update(ref(db, `rooms/${currentRoomId}`), {
-      rounds,
-      'currentRoundData/winner': currentUser.uid,
-      'currentRoundData/winnerPokemon': input,
-      status: newStatus,
-      ...(gameWinner !== null ? { gameWinner } : {})
+      rounds, 'currentRoundData/winner':currentUser.uid, 'currentRoundData/winnerPokemon':input,
+      status:newStatus, lastActivity:serverTimestamp(),
+      ...(gameWinner!==null?{gameWinner}:{})
     });
 
-    if (newStatus === 'playing') {
+    if (newStatus==='playing') {
       setTimeout(async () => {
         const s = await get(ref(db, `rooms/${currentRoomId}`));
         if (!s.exists()) return;
         await update(ref(db, `rooms/${currentRoomId}`), {
-          currentRound: room.currentRound + 1,
-          roundPhase: 'type_selection',
-          currentRoundData: null
+          currentRound:room.currentRound+1, roundPhase:'type_selection',
+          currentRoundData:null, lastActivity:serverTimestamp()
         });
-        hasAnsweredType = false;
-        hasAnsweredPokemon = false;
-        document.getElementById('pokemon-search-input').value = '';
-        document.getElementById('search-results-race').innerHTML = '';
+        hasAnsweredType=false; hasAnsweredPokemon=false;
       }, 3000);
-    } else if (newStatus === 'finished') {
+    } else if (newStatus==='finished') {
       await updatePoints(room, rounds, players, gameWinner);
     }
   };
 
   async function updatePoints(room, rounds, players, gameWinner) {
-    if (room.type !== 'matchmaking') return;
-
+    if (room.type!=='matchmaking') return;
+    const pointChanges = {};
     for (const [uid] of players) {
-      const isWinner = uid === gameWinner;
-      const myRoundsWon = rounds.filter(r => r.winner === uid).length;
-      const totalRounds = rounds.length;
-      const wasAlwaysFirst = rounds.every(r => r.winner !== uid || r.data?.[uid]?.clientTime < r.data?.[Object.keys(r.data).find(u => u !== uid)]?.clientTime);
-
-      let points;
-      if (isWinner) {
-        // 8-15 puntos por victoria
-        const baseWin = myRoundsWon === 3 && wasAlwaysFirst ? 15 : 8;
-        const roundBonus = Math.round((myRoundsWon / totalRounds) * 4);
-        points = Math.min(15, Math.max(8, baseWin + roundBonus));
-      } else {
-        // -8 a -15 por derrota
-        const baseLoss = myRoundsWon === 0 ? -15 : -8;
-        const roundPenalty = myRoundsWon > 0 ? Math.round((myRoundsWon / totalRounds) * 4) : 0;
-        points = Math.max(-15, Math.min(-8, baseLoss + roundPenalty));
-      }
-
-      const userSnap = await get(ref(db, `users/${uid}`));
-      if (userSnap.exists()) {
-        const userData = userSnap.val();
+      const won = uid===gameWinner;
+      const rw  = rounds.filter(r=>r.winner===uid).length;
+      const pts = calcPoints(won, won ? rw : rw);
+      pointChanges[uid] = pts;
+      const s = await get(ref(db, `users/${uid}`));
+      if (s.exists()) {
+        const d = s.val();
         await update(ref(db, `users/${uid}`), {
-          points: Math.max(0, (userData.points || 1000) + points),
-          wins: (userData.wins || 0) + (isWinner ? 1 : 0),
-          losses: (userData.losses || 0) + (!isWinner ? 1 : 0)
+          points:  Math.max(0,(d.points||1000)+pts),
+          wins:    (d.wins||0)+(won?1:0),
+          losses:  (d.losses||0)+(!won&&gameWinner?1:0)
         });
       }
     }
+    await update(ref(db, `rooms/${currentRoomId}`), { pointChanges });
   }
 
   function renderResult(room) {
-    const gameWinner = room.gameWinner;
-    const isWinner = gameWinner === currentUser.uid;
-    const isDraw = !gameWinner;
-
-    document.getElementById('result-title').textContent = isDraw ? '¡Empate!' : (isWinner ? '¡Victoria! 🏆' : 'Derrota 💀');
-    document.getElementById('result-title').className = isDraw ? 'draw' : (isWinner ? 'win' : 'loss');
-
-    const rounds = room.rounds || [];
-    const myWins = rounds.filter(r => r.winner === currentUser.uid).length;
-    const oppWins = rounds.filter(r => r.winner !== currentUser.uid && r.winner).length;
+    const gw = room.gameWinner;
+    const won = gw===currentUser.uid, draw=!gw;
+    document.getElementById('result-title').textContent = draw?'¡Empate!':(won?'¡Victoria! 🏆':'Derrota 💀');
+    document.getElementById('result-title').className   = draw?'draw':(won?'win':'loss');
+    const rounds  = room.rounds||[];
+    const myWins  = rounds.filter(r=>r.winner===currentUser.uid).length;
+    const oppWins = rounds.filter(r=>r.winner!==currentUser.uid&&r.winner).length;
     document.getElementById('result-score').textContent = `${myWins} - ${oppWins}`;
-
-    if (room.type === 'matchmaking') {
-      document.getElementById('result-points').style.display = 'block';
+    const ptsEl = document.getElementById('result-points');
+    if (room.type==='matchmaking' && room.pointChanges) {
+      const change = room.pointChanges[currentUser.uid];
+      if (change!==undefined) {
+        ptsEl.textContent   = change>0?`+${change} puntos`:`${change} puntos`;
+        ptsEl.style.color   = change>0?'var(--accent)':'var(--red)';
+        ptsEl.style.display = 'block';
+      }
+      get(ref(db, `users/${currentUser.uid}`)).then(s => {
+        if (s.exists()) { currentUserData=s.val(); updateUserUI(currentUserData); }
+      });
+    } else {
+      ptsEl.style.display = 'none';
+    }
+    if (room.abandonedBy) {
+      document.getElementById('result-abandoned').style.display = 'block';
     }
   }
 
   window.leaveRoom = async () => {
     if (roomListener) roomListener();
+    if (activityPingInterval) clearInterval(activityPingInterval);
     if (currentRoomId) {
       await remove(ref(db, `rooms/${currentRoomId}/players/${currentUser.uid}`));
       if (isHost) await remove(ref(db, `rooms/${currentRoomId}`));
     }
-    currentRoomId = null;
-    currentRoom = null;
+    currentRoomId=null; currentRoom=null;
     showScreen('menu');
   };
 
-  window.searchPokemon = (inputId) => {
-    const query = (document.getElementById(inputId || 'pokemon-search-input').value || '').toLowerCase();
+  window.searchPokemon = () => {
+    const input = document.getElementById('pokemon-search-input');
+    const query = (input?.value||'').toLowerCase();
     const results = document.getElementById('search-results-race');
-    results.innerHTML = '';
-    if (query.length < 2) return;
-
-    const matches = Object.values(POKEMON_TYPES)
-      .filter(p => p.name.includes(query))
-      .slice(0, 8);
-
-    matches.forEach(p => {
+    results.innerHTML='';
+    if (query.length<2) return;
+    Object.values(POKEMON_TYPES).filter(p=>p.name.includes(query)).slice(0,8).forEach(p => {
       const div = document.createElement('div');
-      div.className = 'search-item';
-      div.innerHTML = `<img src="${p.sprite}" /><span class="search-item-name">${p.displayName}</span>`;
-      div.onclick = () => {
-        document.getElementById('pokemon-search-input').value = p.name;
-        results.innerHTML = '';
-      };
+      div.className='search-item';
+      div.innerHTML=`<img src="${p.sprite}"/><span class="search-item-name">${p.displayName}</span>`;
+      div.onclick=()=>{ input.value=p.name; results.innerHTML=''; };
       results.appendChild(div);
     });
   };
 
   // ===================== UI HELPERS =====================
   function showScreen(name) {
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    const el = document.getElementById(`screen-${name}`);
-    if (el) el.classList.add('active');
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    document.getElementById(`screen-${name}`)?.classList.add('active');
+    if (name==='game') {
+      if (activityPingInterval) clearInterval(activityPingInterval);
+      activityPingInterval = setInterval(async () => {
+        if (currentRoomId&&currentUser) {
+          await update(ref(db, `rooms/${currentRoomId}/players/${currentUser.uid}`), { lastActive:Date.now() });
+          await update(ref(db, `rooms/${currentRoomId}`), { lastActivity:serverTimestamp() });
+        }
+      }, 20000);
+    }
   }
 
   function showToast(msg) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2500);
+    const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'),2500);
   }
-
-  function showLoadingOverlay(msg) {
-    document.getElementById('loading-overlay').style.display = 'flex';
-    document.getElementById('loading-msg').textContent = msg;
-  }
-
-  function hideLoadingOverlay() {
-    document.getElementById('loading-overlay').style.display = 'none';
-  }
+  function showLoadingOverlay(msg) { document.getElementById('loading-overlay').style.display='flex'; document.getElementById('loading-msg').textContent=msg; }
+  function hideLoadingOverlay() { document.getElementById('loading-overlay').style.display='none'; }
 
   function formatType(t) {
-    const names = {
-      normal:"Normal",fire:"Fuego",water:"Agua",electric:"Eléctrico",grass:"Planta",
-      ice:"Hielo",fighting:"Lucha",poison:"Veneno",ground:"Tierra",flying:"Volador",
-      psychic:"Psíquico",bug:"Bicho",rock:"Roca",ghost:"Fantasma",dragon:"Dragón",
-      dark:"Siniestro",steel:"Acero",fairy:"Hada"
-    };
-    return names[t] || t;
+    return {normal:"Normal",fire:"Fuego",water:"Agua",electric:"Eléctrico",grass:"Planta",ice:"Hielo",fighting:"Lucha",poison:"Veneno",ground:"Tierra",flying:"Volador",psychic:"Psíquico",bug:"Bicho",rock:"Roca",ghost:"Fantasma",dragon:"Dragón",dark:"Siniestro",steel:"Acero",fairy:"Hada"}[t]||t;
   }
 
   // Init
   window.addEventListener('DOMContentLoaded', async () => {
     showScreen('landing');
     await loadPokemonData();
-
-    // Type selector
     const sel = document.getElementById('selected-type');
-    if (sel) {
-      TYPES.forEach(t => {
-        const opt = document.createElement('option');
-        opt.value = t; opt.textContent = formatType(t);
-        sel.appendChild(opt);
-      });
-    }
+    if (sel) TYPES.forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=formatType(t); sel.appendChild(o); });
   });
 
-  // Polling fallback para matchmaking
+  // Polling fallback matchmaking guest
   setInterval(async () => {
-    if (currentUser && !currentRoomId && document.getElementById('screen-matchmaking')?.classList.contains('active')) {
-      const allRooms = await get(ref(db, 'rooms'));
-      if (allRooms.exists()) {
-        const myRoom = Object.entries(allRooms.val()).find(([id, r]) =>
-          r.type === 'matchmaking' && r.players?.[currentUser.uid] && r.status === 'waiting'
-        );
-        if (myRoom) {
-          if (matchmakingListener) matchmakingListener();
-          await remove(ref(db, `matchmaking/queue/${currentUser.uid}`));
-          currentRoomId = myRoom[0];
-          isHost = false;
-          listenToRoom(myRoom[0]);
-        }
+    if (currentUser&&!currentRoomId&&document.getElementById('screen-matchmaking')?.classList.contains('active')) {
+      const all = await get(ref(db,'rooms'));
+      if (!all.exists()) return;
+      const myRoom = Object.entries(all.val()).find(([id,r])=>r.type==='matchmaking'&&r.players?.[currentUser.uid]&&(r.status==='preview'||r.status==='playing'));
+      if (myRoom) {
+        if (matchmakingListener) matchmakingListener();
+        await remove(ref(db,`matchmaking/queue/${currentUser.uid}`));
+        currentRoomId=myRoom[0]; isHost=false; listenToRoom(myRoom[0]);
       }
     }
   }, 3000);
 
-  // Host: vigilar que ambos eligieron tipo (fallback por si el setTimeout falla)
+  // Host fallback: ambos tipos elegidos
   setInterval(async () => {
-    if (currentRoomId && isHost && currentRoom?.status === 'playing' && currentRoom?.roundPhase === 'type_selection') {
-      const snap = await get(ref(db, `rooms/${currentRoomId}`));
+    if (currentRoomId&&isHost&&currentRoom?.status==='playing'&&currentRoom?.roundPhase==='type_selection') {
+      const snap=await get(ref(db,`rooms/${currentRoomId}`));
       if (!snap.exists()) return;
-      const room = snap.val();
-      if (room.roundPhase !== 'type_selection') return;
-      const players = Object.keys(room.players);
-      const types = room.currentRoundData?.types || {};
-      if (players.every(uid => types[uid])) {
+      const room=snap.val();
+      if (room.roundPhase!=='type_selection'||room.currentRoundData?.revealed) return;
+      const players=Object.keys(room.players);
+      const types=room.currentRoundData?.types||{};
+      if (players.every(uid=>types[uid])) {
+        await update(ref(db,`rooms/${currentRoomId}/currentRoundData`),{revealed:true});
         checkTypeCombo(types);
       }
     }
   }, 3000);
+
+  // Inactividad rival >2 min → victoria por abandono
+  setInterval(async () => {
+    if (!currentRoomId||!isHost||!currentRoom||currentRoom.status!=='playing') return;
+    const now=Date.now();
+    for (const [uid,p] of Object.entries(currentRoom.players)) {
+      if (uid===currentUser.uid) continue;
+      if (p.lastActive&&now-p.lastActive>120000) {
+        const fakeRounds=[
+          {round:1,winner:currentUser.uid,typeAnswers:{},winnerPokemon:'abandono'},
+          {round:2,winner:currentUser.uid,typeAnswers:{},winnerPokemon:'abandono'},
+          {round:3,winner:currentUser.uid,typeAnswers:{},winnerPokemon:'abandono'},
+        ];
+        await update(ref(db,`rooms/${currentRoomId}`),{rounds:fakeRounds,status:'finished',gameWinner:currentUser.uid,abandonedBy:uid,lastActivity:serverTimestamp()});
+        if (currentRoom.type==='matchmaking') await updatePoints(currentRoom,fakeRounds,Object.entries(currentRoom.players),currentUser.uid);
+        break;
+      }
+    }
+  }, 15000);
+
+  // Limpieza salas inactivas >5 min (solo host)
+  setInterval(async () => {
+    if (!currentRoomId||!isHost) return;
+    const snap=await get(ref(db,`rooms/${currentRoomId}`));
+    if (!snap.exists()) return;
+    const room=snap.val();
+    // lastActivity es serverTimestamp, usamos createdAt como fallback y clientTime
+    if ((room.status==='finished'||room.status==='waiting')&&room.lastActivityClient) {
+      if (Date.now()-room.lastActivityClient>300000) await remove(ref(db,`rooms/${currentRoomId}`));
+    }
+  }, 60000);
+
 </script>
 
 <style>
 :root {
-  --bg: #0d0d1a;
-  --bg2: #13132a;
-  --bg3: #1a1a3a;
-  --accent: #ffde00;
-  --accent2: #3b4cca;
-  --red: #cc0000;
-  --white: #f0f0f0;
-  --muted: #8888aa;
-  --card: #1e1e40;
-  --border: #2a2a55;
-  --radius: 16px;
-  --font-pixel: 'Press Start 2P', monospace;
-  --font-body: 'Nunito', sans-serif;
+  --bg:#0d0d1a; --bg2:#13132a; --bg3:#1a1a3a;
+  --accent:#ffde00; --accent2:#3b4cca; --red:#cc0000;
+  --white:#f0f0f0; --muted:#8888aa;
+  --card:#1e1e40; --border:#2a2a55; --radius:16px;
+  --font-pixel:'Press Start 2P',monospace;
+  --font-body:'Nunito',sans-serif;
 }
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-height:100vh;overflow-x:hidden;}
 
-* { margin: 0; padding: 0; box-sizing: border-box; }
+/* LOADING */
+#loading-overlay{display:none;position:fixed;inset:0;background:#0d0d1aee;z-index:9999;flex-direction:column;align-items:center;justify-content:center;gap:20px;}
+.pokeball-spin{width:60px;height:60px;border-radius:50%;background:linear-gradient(to bottom,#cc0000 50%,white 50%);border:4px solid #333;animation:spin .8s linear infinite;position:relative;}
+.pokeball-spin::after{content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:14px;height:14px;background:white;border-radius:50%;border:3px solid #333;}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+#loading-msg{font-family:var(--font-pixel);font-size:10px;color:var(--accent);}
 
-body {
-  font-family: var(--font-body);
-  background: var(--bg);
-  color: var(--white);
-  min-height: 100vh;
-  overflow-x: hidden;
-}
+/* SCREENS */
+.screen{display:none;min-height:100vh;}
+.screen.active{display:flex;flex-direction:column;align-items:center;}
 
-/* ── LOADING ── */
-#loading-overlay {
-  display: none;
-  position: fixed; inset: 0;
-  background: #0d0d1aee;
-  z-index: 9999;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-}
-.pokeball-spin {
-  width: 60px; height: 60px;
-  border-radius: 50%;
-  background: linear-gradient(to bottom, #cc0000 50%, white 50%);
-  border: 4px solid #333;
-  animation: spin 0.8s linear infinite;
-  position: relative;
-}
-.pokeball-spin::after {
-  content: '';
-  position: absolute;
-  left: 50%; top: 50%;
-  transform: translate(-50%,-50%);
-  width: 14px; height: 14px;
-  background: white;
-  border-radius: 50%;
-  border: 3px solid #333;
-}
-@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
-#loading-msg { font-family: var(--font-pixel); font-size: 10px; color: var(--accent); }
+/* TOAST */
+#toast{position:fixed;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--card);border:1px solid var(--border);padding:12px 24px;border-radius:30px;font-weight:700;opacity:0;transition:all .3s;z-index:9998;white-space:nowrap;}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 
-/* ── SCREENS ── */
-.screen { display: none; min-height: 100vh; }
-.screen.active { display: flex; flex-direction: column; align-items: center; }
+/* LANDING */
+#screen-landing{background:radial-gradient(ellipse at 50% 0%,#1a1a5a 0%,var(--bg) 70%);justify-content:center;text-align:center;gap:40px;padding:40px 20px;position:relative;}
+.logo{font-family:var(--font-pixel);font-size:clamp(20px,5vw,36px);line-height:1.6;text-shadow:4px 4px 0 var(--red),8px 8px 0 var(--accent2);}
+.logo span{color:var(--accent);}
+.logo small{display:block;font-size:.4em;color:var(--muted);margin-top:10px;letter-spacing:2px;}
+.pokeball-hero{width:120px;height:120px;border-radius:50%;background:linear-gradient(to bottom,var(--red) 50%,white 50%);border:6px solid #555;position:relative;animation:float 3s ease-in-out infinite;margin:0 auto;}
+.pokeball-hero::before{content:'';position:absolute;left:0;right:0;top:calc(50% - 3px);height:6px;background:#555;}
+.pokeball-hero::after{content:'';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:26px;height:26px;background:white;border-radius:50%;border:4px solid #555;}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-15px)}}
+.version-badge{position:absolute;bottom:14px;right:16px;font-family:var(--font-pixel);font-size:9px;color:var(--muted);opacity:.6;}
 
-/* ── TOAST ── */
-#toast {
-  position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px);
-  background: var(--card); border: 1px solid var(--border);
-  padding: 12px 24px; border-radius: 30px;
-  font-weight: 700; opacity: 0; transition: all 0.3s;
-  z-index: 9998; white-space: nowrap;
-}
-#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:16px 32px;border-radius:50px;font-family:var(--font-body);font-size:18px;font-weight:900;cursor:pointer;border:none;transition:all .2s;letter-spacing:.5px;}
+.btn:hover{transform:translateY(-2px);}
+.btn:active{transform:translateY(0);}
+.btn-primary{background:var(--accent);color:#111;}
+.btn-secondary{background:var(--card);color:var(--white);border:2px solid var(--border);}
+.btn-blue{background:var(--accent2);color:white;}
+.btn-sm{padding:10px 20px;font-size:14px;}
 
-/* ── LANDING ── */
-#screen-landing {
-  background: radial-gradient(ellipse at 50% 0%, #1a1a5a 0%, var(--bg) 70%);
-  justify-content: center;
-  text-align: center;
-  gap: 40px;
-  padding: 40px 20px;
-}
-.logo {
-  font-family: var(--font-pixel);
-  font-size: clamp(20px, 5vw, 36px);
-  line-height: 1.6;
-  text-shadow: 4px 4px 0 var(--red), 8px 8px 0 var(--accent2);
-}
-.logo span { color: var(--accent); }
-.logo small { display: block; font-size: 0.4em; color: var(--muted); margin-top: 10px; letter-spacing: 2px; }
-.pokeball-hero {
-  width: 120px; height: 120px;
-  border-radius: 50%;
-  background: linear-gradient(to bottom, var(--red) 50%, white 50%);
-  border: 6px solid #555;
-  position: relative;
-  animation: float 3s ease-in-out infinite;
-  margin: 0 auto;
-}
-.pokeball-hero::before {
-  content: '';
-  position: absolute;
-  left: 0; right: 0;
-  top: calc(50% - 3px);
-  height: 6px;
-  background: #555;
-}
-.pokeball-hero::after {
-  content: '';
-  position: absolute;
-  left: 50%; top: 50%;
-  transform: translate(-50%,-50%);
-  width: 26px; height: 26px;
-  background: white;
-  border-radius: 50%;
-  border: 4px solid #555;
-}
-@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-15px)} }
+/* MENU */
+#screen-menu{background:radial-gradient(ellipse at 50% 0%,#1a1a5a 0%,var(--bg) 70%);padding:30px 20px;gap:20px;}
+.top-bar{width:100%;max-width:600px;display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;}
+.top-bar img{width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);}
+.top-bar .info{flex:1;}
+.top-bar .info .name{font-weight:900;font-size:16px;}
+.top-bar .info .pts-rank{display:flex;align-items:center;gap:6px;color:var(--accent);font-weight:700;font-size:14px;}
+.top-bar .info .pts-rank img{width:20px;height:20px;}
+.menu-title{font-family:var(--font-pixel);font-size:clamp(14px,3vw,22px);color:var(--accent);text-align:center;text-shadow:2px 2px 0 var(--red);}
+.menu-cards{width:100%;max-width:600px;display:flex;flex-direction:column;gap:16px;}
+.menu-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:20px;}
+.menu-card:hover{border-color:var(--accent);transform:translateX(4px);}
+.menu-card .icon{font-size:40px;}
+.menu-card .text h3{font-size:20px;font-weight:900;margin-bottom:4px;}
+.menu-card .text p{color:var(--muted);font-size:14px;}
+.stat-bar{width:100%;max-width:600px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 24px;display:flex;gap:30px;justify-content:center;}
+.stat{text-align:center;}
+.stat-val{font-size:24px;font-weight:900;color:var(--accent);}
+.stat-label{font-size:12px;color:var(--muted);}
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 16px 32px;
-  border-radius: 50px;
-  font-family: var(--font-body);
-  font-size: 18px;
-  font-weight: 900;
-  cursor: pointer;
-  border: none;
-  transition: all 0.2s;
-  letter-spacing: 0.5px;
-}
-.btn:hover { transform: translateY(-2px); }
-.btn:active { transform: translateY(0); }
-.btn-primary { background: var(--accent); color: #111; }
-.btn-secondary { background: var(--card); color: var(--white); border: 2px solid var(--border); }
-.btn-red { background: var(--red); color: white; }
-.btn-blue { background: var(--accent2); color: white; }
-.btn-sm { padding: 10px 20px; font-size: 14px; }
+/* MODALS */
+.modal-bg{display:none;position:fixed;inset:0;background:#000a;z-index:500;align-items:center;justify-content:center;}
+.modal-bg.open{display:flex;}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:400px;width:90%;display:flex;flex-direction:column;gap:16px;}
+.modal h3{font-size:20px;font-weight:900;}
+.modal input{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:15px;color:var(--white);font-family:var(--font-body);width:100%;}
+.modal-sep{text-align:center;color:var(--muted);font-weight:700;}
 
-/* ── MENU ── */
-#screen-menu {
-  background: radial-gradient(ellipse at 50% 0%, #1a1a5a 0%, var(--bg) 70%);
-  padding: 30px 20px;
-  gap: 20px;
-}
-.top-bar {
-  width: 100%; max-width: 600px;
-  display: flex; align-items: center; gap: 12px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 20px;
-}
-.top-bar img { width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--accent); }
-.top-bar .info { flex: 1; }
-.top-bar .info .name { font-weight: 900; font-size: 16px; }
-.top-bar .info .pts { color: var(--accent); font-weight: 700; font-size: 14px; }
-.menu-title {
-  font-family: var(--font-pixel);
-  font-size: clamp(14px, 3vw, 22px);
-  color: var(--accent);
-  text-align: center;
-  text-shadow: 2px 2px 0 var(--red);
-}
-.menu-cards {
-  width: 100%; max-width: 600px;
-  display: flex; flex-direction: column; gap: 16px;
-}
-.menu-card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  cursor: pointer;
-  transition: all 0.2s;
-  display: flex; align-items: center; gap: 20px;
-}
-.menu-card:hover { border-color: var(--accent); transform: translateX(4px); }
-.menu-card .icon { font-size: 40px; }
-.menu-card .text h3 { font-size: 20px; font-weight: 900; margin-bottom: 4px; }
-.menu-card .text p { color: var(--muted); font-size: 14px; }
-.stat-bar {
-  width: 100%; max-width: 600px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 24px;
-  display: flex; gap: 30px; justify-content: center;
-}
-.stat { text-align: center; }
-.stat-val { font-size: 24px; font-weight: 900; color: var(--accent); }
-.stat-label { font-size: 12px; color: var(--muted); }
+/* LOBBY */
+#screen-lobby{padding:30px 20px;gap:24px;}
+.lobby-header{text-align:center;}
+.code-display{font-family:var(--font-pixel);font-size:28px;color:var(--accent);letter-spacing:8px;background:var(--card);border:2px dashed var(--border);padding:20px 40px;border-radius:var(--radius);text-align:center;}
+#lobby-players{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;}
+.lobby-player{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;text-align:center;min-width:140px;}
+.lobby-player img{width:70px;height:70px;border-radius:50%;border:3px solid var(--accent2);margin-bottom:10px;}
+.lobby-player span{display:block;font-weight:700;}
+.host-badge{background:var(--accent);color:#111;font-size:10px;font-weight:900;padding:3px 8px;border-radius:20px;margin-top:6px;display:inline-block;}
 
-/* ── PRIVATE MODAL ── */
-.modal-bg {
-  display: none;
-  position: fixed; inset: 0;
-  background: #000a;
-  z-index: 500;
-  align-items: center;
-  justify-content: center;
-}
-.modal-bg.open { display: flex; }
-.modal {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 32px;
-  max-width: 400px;
-  width: 90%;
-  display: flex; flex-direction: column; gap: 16px;
-}
-.modal h3 { font-size: 20px; font-weight: 900; }
-.modal input {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 16px;
-  font-size: 20px;
-  color: var(--white);
-  font-family: var(--font-pixel);
-  font-size: 16px;
-  letter-spacing: 4px;
-  text-align: center;
-  width: 100%;
-}
-.modal-sep { text-align: center; color: var(--muted); font-weight: 700; }
+/* MATCHMAKING */
+#screen-matchmaking{justify-content:center;gap:30px;text-align:center;padding:40px 20px;}
+.radar{width:120px;height:120px;border-radius:50%;border:3px solid var(--accent2);animation:radar-pulse 2s infinite;}
+@keyframes radar-pulse{0%{box-shadow:0 0 0 0 rgba(59,76,202,.4)}70%{box-shadow:0 0 0 30px rgba(59,76,202,0)}100%{box-shadow:0 0 0 0 rgba(59,76,202,0)}}
 
-/* ── LOBBY ── */
-#screen-lobby {
-  padding: 30px 20px;
-  gap: 24px;
-  background: var(--bg);
-}
-.lobby-header { text-align: center; }
-.lobby-header h2 { font-size: 24px; font-weight: 900; }
-.code-display {
-  font-family: var(--font-pixel);
-  font-size: 28px;
-  color: var(--accent);
-  letter-spacing: 8px;
-  background: var(--card);
-  border: 2px dashed var(--border);
-  padding: 20px 40px;
-  border-radius: var(--radius);
-  text-align: center;
-}
-#lobby-players {
-  display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;
-}
-.lobby-player {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 24px;
-  text-align: center;
-  min-width: 140px;
-}
-.lobby-player img { width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--accent2); margin-bottom: 10px; }
-.lobby-player span { display: block; font-weight: 700; }
-.host-badge {
-  background: var(--accent); color: #111;
-  font-size: 10px; font-weight: 900;
-  padding: 3px 8px; border-radius: 20px;
-  margin-top: 6px; display: inline-block;
-}
-.waiting-dots::after {
-  content: '...';
-  animation: dots 1.5s infinite;
-}
-@keyframes dots { 0%{content:'.'} 33%{content:'..'} 66%{content:'...'} }
+/* MATCHMAKING PREVIEW */
+#screen-matchmaking-preview{justify-content:center;gap:30px;padding:40px 20px;background:radial-gradient(ellipse at 50% 0%,#1a1a5a,var(--bg));}
+.preview-arena{display:flex;gap:30px;align-items:center;flex-wrap:wrap;justify-content:center;}
+.preview-player{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:30px 24px;text-align:center;min-width:150px;}
+.preview-player img.avatar{width:80px;height:80px;border-radius:50%;border:3px solid var(--accent2);margin-bottom:12px;}
+.preview-player .pname{font-size:18px;font-weight:900;margin-bottom:6px;}
+.preview-player .ppts{color:var(--accent);font-weight:700;font-size:14px;margin-bottom:8px;}
+.preview-player img.rank-icon{width:32px;height:32px;}
+.preview-vs{font-family:var(--font-pixel);font-size:28px;color:var(--red);text-shadow:2px 2px 0 #600;}
+.waiting-dots::after{content:'...';animation:dots 1.5s infinite;}
+@keyframes dots{0%{content:'.'}33%{content:'..'}66%{content:'...'}}
 
-/* ── MATCHMAKING ── */
-#screen-matchmaking {
-  justify-content: center;
-  gap: 30px;
-  text-align: center;
-  padding: 40px 20px;
-}
-.radar {
-  width: 120px; height: 120px;
-  border-radius: 50%;
-  border: 3px solid var(--accent2);
-  position: relative;
-  animation: radar-pulse 2s infinite;
-}
-@keyframes radar-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(59,76,202,0.4); }
-  70% { box-shadow: 0 0 0 30px rgba(59,76,202,0); }
-  100% { box-shadow: 0 0 0 0 rgba(59,76,202,0); }
-}
+/* GAME */
+#screen-game{padding:16px;gap:12px;width:100%;}
+.game-header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:8px 12px;width:100%;max-width:800px;}
+.gh-side{display:flex;align-items:center;}
+.gh-side-right{justify-content:flex-end;}
+.gh-center{display:flex;justify-content:center;}
+.score-display{font-family:var(--font-pixel);font-size:20px;display:flex;gap:14px;align-items:center;}
+.score-display .wins{color:var(--accent);}
+.score-display .sep{color:var(--muted);}
+.round-banner{font-family:var(--font-pixel);font-size:10px;color:var(--muted);letter-spacing:1px;}
+.game-arena{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:start;width:100%;max-width:800px;}
+.player-side{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;}
+.player-side.me{border-color:var(--accent2);}
+.player-side img.avatar{width:60px;height:60px;border-radius:50%;border:3px solid var(--border);}
+.player-side.me img.avatar{border-color:var(--accent2);}
+.player-side .p-name{font-weight:900;font-size:13px;text-align:center;}
+.player-side .p-pts{font-size:12px;color:var(--accent);font-weight:700;}
+.player-side .p-rank{width:22px;height:22px;}
+.center-col{display:flex;flex-direction:column;align-items:center;gap:10px;}
 
-/* ── GAME ── */
-#screen-game {
-  padding: 20px;
-  gap: 16px;
-  background: var(--bg);
-  width: 100%;
-}
-.game-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  max-width: 700px;
-}
-.score-display {
-  font-family: var(--font-pixel);
-  font-size: 18px;
-  display: flex;
-  gap: 16px;
-  align-items: center;
-}
-.score-display .wins { color: var(--accent); }
-.score-display .sep { color: var(--muted); }
+/* COMBO DISPLAY */
+#combo-display{display:none;flex-direction:row;gap:10px;align-items:center;justify-content:center;background:var(--bg3);border-radius:14px;padding:14px 20px;}
 
-.game-arena {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  gap: 16px;
-  align-items: start;
-  width: 100%;
-  max-width: 800px;
-}
-.player-side {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px 16px;
-}
-.player-side.me { border-color: var(--accent2); }
-.player-side img { width: 64px; height: 64px; border-radius: 50%; border: 3px solid var(--border); }
-.player-side.me img { border-color: var(--accent2); }
-.player-side .p-name { font-weight: 900; font-size: 14px; text-align: center; }
+/* FASES */
+#phase-type-selection{display:flex;flex-direction:column;gap:12px;align-items:center;width:220px;}
+#phase-no-combo{display:none;flex-direction:column;gap:14px;align-items:center;text-align:center;background:var(--card);border:2px solid var(--red);border-radius:16px;padding:24px 20px;}
+#phase-pokemon-race{display:none;flex-direction:column;gap:12px;align-items:center;width:100%;max-width:320px;}
 
-.center-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
+/* TYPE SELECTOR */
+#type-select-input{display:flex;flex-direction:column;gap:10px;width:100%;}
+#selected-type{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px;color:var(--white);font-size:15px;width:100%;font-family:var(--font-body);}
+#waiting-opponent-type{display:none;text-align:center;color:var(--muted);font-size:14px;font-weight:700;}
 
-#central-pokemon {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-  text-align: center;
-  display: none;
-}
-#central-pokemon img { width: 100px; height: 100px; }
-#central-pokemon .pname { font-weight: 900; font-size: 14px; margin: 6px 0; }
-.central-types { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+/* SEARCH */
+.search-wrap{position:relative;width:100%;}
+#pokemon-search-input{background:var(--bg3);border:2px solid var(--accent2);border-radius:12px;padding:14px 16px;color:var(--white);font-size:17px;width:100%;font-family:var(--font-body);}
+#search-results-race{position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:12px;z-index:100;max-height:300px;overflow-y:auto;margin-top:4px;}
+.search-item{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;transition:background .15s;min-height:56px;}
+.search-item:hover{background:var(--bg3);}
+.search-item img{width:52px;height:52px;}
+.search-item-name{font-size:17px;font-weight:800;flex:1;}
 
-#type-input-area {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-  flex-direction: column;
-  gap: 10px;
-  position: relative;
-  width: 220px;
-}
-#pokemon-search {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  color: var(--white);
-  font-size: 15px;
-  width: 100%;
-  font-family: var(--font-body);
-}
-#search-results {
-  position: absolute;
-  top: 100%;
-  left: 0; right: 0;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  z-index: 100;
-  max-height: 220px;
-  overflow-y: auto;
-}
-.search-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  cursor: pointer;
-  transition: background 0.15s;
-  font-size: 13px;
-}
-.search-item:hover { background: var(--bg3); }
-.search-item img { width: 36px; height: 36px; }
-#pokemon-preview {
-  width: 70px; height: 70px;
-  display: none;
-  margin: 0 auto;
-}
-#selected-type {
-  background: var(--bg3);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px;
-  color: var(--white);
-  font-size: 14px;
-  width: 100%;
-  font-family: var(--font-body);
-}
+/* TYPE BADGES */
+.type-badge{display:inline-block;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;color:white;text-shadow:1px 1px 0 rgba(0,0,0,.3);min-width:60px;text-align:center;}
+.type-badge.big{font-size:16px;padding:10px 20px;min-width:100px;}
+.type-badge.normal{background:#A8A878;}.type-badge.fire{background:#F08030;}.type-badge.water{background:#6890F0;}.type-badge.electric{background:#F8D030;color:#333;}.type-badge.grass{background:#78C850;}.type-badge.ice{background:#98D8D8;color:#333;}.type-badge.fighting{background:#C03028;}.type-badge.poison{background:#A040A0;}.type-badge.ground{background:#E0C068;color:#333;}.type-badge.flying{background:#A890F0;}.type-badge.psychic{background:#F85888;}.type-badge.bug{background:#A8B820;}.type-badge.rock{background:#B8A038;}.type-badge.ghost{background:#705898;}.type-badge.dragon{background:#7038F8;}.type-badge.dark{background:#705848;}.type-badge.steel{background:#B8B8D0;color:#333;}.type-badge.fairy{background:#EE99AC;}
 
-/* ── TYPE BADGES ── */
-.type-badge {
-  display: inline-block;
-  padding: 5px 12px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 700;
-  color: white;
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.3);
-  min-width: 60px;
-  text-align: center;
-}
-.type-badge.normal { background: #A8A878; }
-.type-badge.fire { background: #F08030; }
-.type-badge.water { background: #6890F0; }
-.type-badge.electric { background: #F8D030; color: #333; }
-.type-badge.grass { background: #78C850; }
-.type-badge.ice { background: #98D8D8; color: #333; }
-.type-badge.fighting { background: #C03028; }
-.type-badge.poison { background: #A040A0; }
-.type-badge.ground { background: #E0C068; color: #333; }
-.type-badge.flying { background: #A890F0; }
-.type-badge.psychic { background: #F85888; }
-.type-badge.bug { background: #A8B820; }
-.type-badge.rock { background: #B8A038; }
-.type-badge.ghost { background: #705898; }
-.type-badge.dragon { background: #7038F8; }
-.type-badge.dark { background: #705848; }
-.type-badge.steel { background: #B8B8D0; color: #333; }
-.type-badge.fairy { background: #EE99AC; }
+/* WINNER POKEMON */
+#winner-pokemon-display{display:none;flex-direction:column;align-items:center;gap:6px;}
+#winner-pokemon-display img{width:90px;height:90px;}
+#winner-pokemon-display div{font-weight:900;font-size:16px;}
 
-.vs-types {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  background: var(--bg3);
-  border-radius: 10px;
-  padding: 10px;
-}
-.type-badge.big {
-  font-size: 16px;
-  padding: 10px 20px;
-  min-width: 100px;
-}
-.search-item-name {
-  font-size: 17px;
-  font-weight: 800;
-  flex: 1;
-}
-.search-item img { width: 52px; height: 52px; }
-.search-item { padding: 10px 14px; font-size: 15px; min-height: 56px; }
+/* RESULT */
+#screen-result{justify-content:center;gap:24px;text-align:center;padding:40px 20px;}
+#result-title{font-family:var(--font-pixel);font-size:clamp(18px,4vw,28px);}
+#result-title.win{color:var(--accent);}
+#result-title.loss{color:var(--red);}
+#result-title.draw{color:var(--muted);}
+#result-score{font-family:var(--font-pixel);font-size:48px;}
+#result-points{display:none;font-size:22px;font-weight:900;}
+#result-abandoned{display:none;color:var(--muted);font-size:14px;}
 
-/* ── ROUND RESULT ── */
-.round-result-toast {
-  position: fixed;
-  top: 50%; left: 50%;
-  transform: translate(-50%,-50%);
-  background: var(--card);
-  border: 2px solid var(--accent);
-  border-radius: var(--radius);
-  padding: 30px 50px;
-  font-size: 24px;
-  font-weight: 900;
-  z-index: 200;
-  text-align: center;
-  animation: pop 0.3s ease;
-}
-@keyframes pop { from{transform:translate(-50%,-50%) scale(0.8)} to{transform:translate(-50%,-50%) scale(1)} }
+/* MISC */
+.flex-col{display:flex;flex-direction:column;align-items:center;gap:12px;}
+.flex-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;}
+.text-muted{color:var(--muted);font-size:14px;}
+.w-full{width:100%;max-width:600px;}
 
-/* ── RESULT ── */
-#screen-result {
-  justify-content: center;
-  gap: 30px;
-  text-align: center;
-  padding: 40px 20px;
-}
-#result-title { font-family: var(--font-pixel); font-size: clamp(18px, 4vw, 28px); }
-#result-title.win { color: var(--accent); }
-#result-title.loss { color: var(--red); }
-#result-title.draw { color: var(--muted); }
-#result-score { font-family: var(--font-pixel); font-size: 48px; color: var(--white); }
-
-/* ── MISC ── */
-.sep-line { width: 100%; max-width: 600px; height: 1px; background: var(--border); }
-.flex-col { display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.flex-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-.text-muted { color: var(--muted); font-size: 14px; }
-.w-full { width: 100%; max-width: 600px; }
-
-/* ── GAME HEADER centrado ── */
-.game-header {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-}
-.gh-side { display: flex; align-items: center; }
-.gh-side-right { justify-content: flex-end; }
-.gh-center { display: flex; justify-content: center; }
-  font-family: var(--font-pixel);
-  font-size: 11px;
-  color: var(--muted);
-  text-align: center;
-  letter-spacing: 2px;
-}
-
-@media (max-width: 600px) {
-  .game-arena { grid-template-columns: 1fr; }
-  .center-col { order: -1; }
-  #type-input-area { width: 100%; }
+@media(max-width:600px){
+  .game-arena{grid-template-columns:1fr;}
+  .center-col{order:-1;}
+  #phase-type-selection,#phase-pokemon-race{width:100%;}
 }
 </style>
 </head>
 <body>
 
-<!-- LOADING OVERLAY -->
+<!-- LOADING -->
 <div id="loading-overlay">
   <div class="pokeball-spin"></div>
   <div id="loading-msg">Cargando Pokédex...</div>
@@ -1306,12 +882,9 @@ body {
 
 <!-- ===================== LANDING ===================== -->
 <div class="screen active" id="screen-landing">
-  <div style="position:absolute;bottom:16px;right:16px;font-size:10px;color:var(--muted);font-family:var(--font-pixel);opacity:0.6">v0.3.0</div>
+  <div class="version-badge">v0.4.0</div>
   <div class="pokeball-hero"></div>
-  <div class="logo">
-    <span>PokeType</span><br>Duel
-    <small>¿Cuánto sabes de tipos?</small>
-  </div>
+  <div class="logo"><span>PokeType</span><br>Duel<small>¿Cuánto sabes de tipos?</small></div>
   <div class="flex-row">
     <button class="btn btn-primary" onclick="openAuthModal('login')">Iniciar sesión</button>
     <button class="btn btn-blue" onclick="openAuthModal('register')">Registrarse</button>
@@ -1321,24 +894,20 @@ body {
 <!-- AUTH MODAL -->
 <div class="modal-bg" id="auth-modal">
   <div class="modal" style="max-width:380px">
-    <!-- LOGIN TAB -->
-    <div id="auth-login">
-      <h3 style="margin-bottom:4px">Iniciar sesión</h3>
-      <p class="text-muted" style="font-size:13px;margin-bottom:8px">Bienvenido de nuevo</p>
-      <input type="email" id="login-email" placeholder="Correo electrónico" style="letter-spacing:normal;font-family:var(--font-body);font-size:15px;text-align:left" />
-      <input type="password" id="login-password" placeholder="Contraseña" style="letter-spacing:normal;font-family:var(--font-body);font-size:15px;text-align:left" />
+    <div id="auth-login" style="display:flex;flex-direction:column;gap:12px">
+      <h3>Iniciar sesión</h3>
+      <input type="email" id="login-email" placeholder="Correo electrónico" />
+      <input type="password" id="login-password" placeholder="Contraseña" />
       <button class="btn btn-primary" onclick="loginWithEmail()">Entrar</button>
-      <p class="text-muted" style="text-align:center;font-size:13px">¿No tienes cuenta? <a href="#" onclick="switchAuthTab('register')" style="color:var(--accent);text-decoration:none;font-weight:700">Regístrate</a></p>
+      <p class="text-muted" style="text-align:center">¿No tienes cuenta? <a href="#" onclick="switchAuthTab('register')" style="color:var(--accent);text-decoration:none;font-weight:700">Regístrate</a></p>
     </div>
-    <!-- REGISTER TAB -->
-    <div id="auth-register" style="display:none">
-      <h3 style="margin-bottom:4px">Crear cuenta</h3>
-      <p class="text-muted" style="font-size:13px;margin-bottom:8px">Únete a la batalla</p>
-      <input type="text" id="reg-username" placeholder="Nombre de usuario" style="letter-spacing:normal;font-family:var(--font-body);font-size:15px;text-align:left" maxlength="20" />
-      <input type="email" id="reg-email" placeholder="Correo electrónico" style="letter-spacing:normal;font-family:var(--font-body);font-size:15px;text-align:left" />
-      <input type="password" id="reg-password" placeholder="Contraseña (mín. 6 caracteres)" style="letter-spacing:normal;font-family:var(--font-body);font-size:15px;text-align:left" />
+    <div id="auth-register" style="display:none;flex-direction:column;gap:12px">
+      <h3>Crear cuenta</h3>
+      <input type="text" id="reg-username" placeholder="Nombre de usuario" maxlength="20" />
+      <input type="email" id="reg-email" placeholder="Correo electrónico" />
+      <input type="password" id="reg-password" placeholder="Contraseña (mín. 6 caracteres)" />
       <button class="btn btn-blue" onclick="registerWithEmail()">Crear cuenta</button>
-      <p class="text-muted" style="text-align:center;font-size:13px">¿Ya tienes cuenta? <a href="#" onclick="switchAuthTab('login')" style="color:var(--accent);text-decoration:none;font-weight:700">Inicia sesión</a></p>
+      <p class="text-muted" style="text-align:center">¿Ya tienes cuenta? <a href="#" onclick="switchAuthTab('login')" style="color:var(--accent);text-decoration:none;font-weight:700">Inicia sesión</a></p>
     </div>
     <button class="btn btn-secondary btn-sm" onclick="document.getElementById('auth-modal').classList.remove('open')">Cancelar</button>
   </div>
@@ -1350,30 +919,21 @@ body {
     <img class="user-avatar" src="" alt="avatar" />
     <div class="info">
       <div class="name user-name">Jugador</div>
-      <div class="pts">⭐ <span class="user-points">1000</span> pts</div>
+      <div class="pts-rank">⭐ <span class="user-points">1000</span> <img class="user-rank-icon" src="" title="Rango" /></div>
     </div>
     <button class="btn btn-secondary btn-sm" onclick="logout()">Salir</button>
   </div>
-
   <div class="menu-title">— ELIGE MODO —</div>
-
   <div class="menu-cards">
     <div class="menu-card" onclick="document.getElementById('private-modal').classList.add('open')">
       <div class="icon">🔒</div>
-      <div class="text">
-        <h3>Sala Privada</h3>
-        <p>Juega con amigos por código · Sin puntos</p>
-      </div>
+      <div class="text"><h3>Sala Privada</h3><p>Juega con amigos por código · Sin puntos</p></div>
     </div>
     <div class="menu-card" onclick="startMatchmaking()">
       <div class="icon">⚔️</div>
-      <div class="text">
-        <h3>Matchmaking</h3>
-        <p>Enfréntate a rivales aleatorios · Gana o pierde puntos</p>
-      </div>
+      <div class="text"><h3>Matchmaking</h3><p>Enfréntate a rivales aleatorios · Gana o pierde puntos</p></div>
     </div>
   </div>
-
   <div class="stat-bar w-full">
     <div class="stat"><div class="stat-val user-wins">0</div><div class="stat-label">Victorias</div></div>
     <div class="stat"><div class="stat-val user-points">1000</div><div class="stat-label">Puntos</div></div>
@@ -1385,10 +945,10 @@ body {
 <div class="modal-bg" id="private-modal">
   <div class="modal">
     <h3>🔒 Sala Privada</h3>
-    <button class="btn btn-primary" onclick="createPrivateRoom(); document.getElementById('private-modal').classList.remove('open')">Crear sala nueva</button>
+    <button class="btn btn-primary" onclick="createPrivateRoom();document.getElementById('private-modal').classList.remove('open')">Crear sala nueva</button>
     <div class="modal-sep">— o únete con un código —</div>
-    <input type="text" id="join-code-input" placeholder="XXXXXX" maxlength="6" style="text-transform:uppercase" />
-    <button class="btn btn-blue" onclick="joinPrivateRoom(); document.getElementById('private-modal').classList.remove('open')">Unirse</button>
+    <input type="text" id="join-code-input" placeholder="XXXXXX" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;text-align:center;font-family:var(--font-pixel);font-size:16px" />
+    <button class="btn btn-blue" onclick="joinPrivateRoom();document.getElementById('private-modal').classList.remove('open')">Unirse</button>
     <button class="btn btn-secondary btn-sm" onclick="document.getElementById('private-modal').classList.remove('open')">Cancelar</button>
   </div>
 </div>
@@ -1399,14 +959,11 @@ body {
     <div id="lobby-mode" style="color:var(--muted);font-size:14px;margin-bottom:8px">Sala</div>
     <h2>Esperando jugadores<span class="waiting-dots"></span></h2>
   </div>
-
   <div class="flex-col">
     <p class="text-muted">Código de sala:</p>
     <div class="code-display" id="room-code-display">------</div>
   </div>
-
   <div id="lobby-players"></div>
-
   <div class="flex-col">
     <button class="btn btn-primary" id="start-game-btn" style="display:none" onclick="startGame()">¡Comenzar Partida!</button>
     <button class="btn btn-secondary btn-sm" onclick="leaveRoom()">Salir</button>
@@ -1423,10 +980,30 @@ body {
   <button class="btn btn-secondary" onclick="cancelMatchmaking()">Cancelar</button>
 </div>
 
+<!-- ===================== MATCHMAKING PREVIEW ===================== -->
+<div class="screen" id="screen-matchmaking-preview">
+  <div style="font-family:var(--font-pixel);font-size:14px;color:var(--accent);text-shadow:2px 2px 0 var(--red);margin-bottom:10px">¡Rival encontrado!</div>
+  <div class="preview-arena">
+    <div class="preview-player">
+      <img class="avatar" id="preview-my-avatar" src="" alt="yo" />
+      <div class="pname" id="preview-my-name">Tú</div>
+      <div class="ppts" id="preview-my-pts">⭐ 1000</div>
+      <img class="rank-icon" id="preview-my-rank" src="" />
+    </div>
+    <div class="preview-vs">VS</div>
+    <div class="preview-player">
+      <img class="avatar" id="preview-opp-avatar" src="" alt="rival" />
+      <div class="pname" id="preview-opp-name">Rival</div>
+      <div class="ppts" id="preview-opp-pts">⭐ 1000</div>
+      <img class="rank-icon" id="preview-opp-rank" src="" />
+    </div>
+  </div>
+  <p class="text-muted">La partida comenzará en 5 segundos<span class="waiting-dots"></span></p>
+</div>
+
 <!-- ===================== GAME ===================== -->
 <div class="screen" id="screen-game">
-  <!-- Header con marcador centrado sobre la columna central -->
-  <div class="game-header w-full" style="max-width:800px">
+  <div class="game-header">
     <div class="gh-side">
       <div class="round-banner" id="game-round">Ronda 1/5</div>
     </div>
@@ -1442,69 +1019,68 @@ body {
     </div>
   </div>
 
-  <div class="game-arena" style="max-width:800px;width:100%">
-    <!-- Me -->
+  <div class="game-arena">
+    <!-- Yo -->
     <div class="player-side me">
-      <img id="my-avatar" src="" alt="yo" />
+      <img class="avatar" id="my-avatar" src="" alt="yo" />
       <div class="p-name" id="my-name">Tú</div>
-      <div style="font-size:12px;color:var(--muted)">Tipo elegido:</div>
+      <div class="p-pts" id="my-pts-ingame">⭐ 1000</div>
+      <img class="p-rank" id="my-rank-ingame" src="" title="rango" />
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Tipo:</div>
       <span class="type-badge" id="my-type-badge">?</span>
     </div>
 
-    <!-- Center -->
+    <!-- Centro -->
     <div class="center-col">
-
-      <!-- Combo display (visible en fase pokemon_race) -->
-      <div id="combo-display" style="display:none;flex-direction:row;gap:10px;align-items:center;justify-content:center;background:var(--bg3);border-radius:14px;padding:14px 20px;">
+      <!-- Combo tipos (fase race) -->
+      <div id="combo-display">
         <span class="type-badge big" id="combo-type1"></span>
         <span style="font-size:22px;font-weight:900;color:var(--white)">+</span>
         <span class="type-badge big" id="combo-type2"></span>
       </div>
 
       <!-- FASE 1: Selección de tipo -->
-      <div id="phase-type-selection" style="display:flex;flex-direction:column;gap:12px;align-items:center;width:220px">
-        <p style="font-weight:800;text-align:center;font-size:14px;color:var(--white)">Elige un tipo</p>
-        <div id="type-select-input" style="display:flex;flex-direction:column;gap:10px;width:100%">
-          <select id="selected-type" style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px;color:var(--white);font-size:15px;width:100%;font-family:var(--font-body)">
-            <option value="">— Selecciona tipo —</option>
-          </select>
+      <div id="phase-type-selection">
+        <p style="font-weight:800;text-align:center;font-size:14px">Elige un tipo</p>
+        <div id="type-select-input">
+          <select id="selected-type"><option value="">— Selecciona tipo —</option></select>
           <button class="btn btn-primary" onclick="submitType()">✅ Confirmar tipo</button>
         </div>
-        <div id="waiting-opponent-type" style="display:none;text-align:center;color:var(--muted);font-size:14px;font-weight:700">
+        <div id="waiting-opponent-type">
           ✅ Tipo elegido<br><span class="waiting-dots" style="font-size:12px">Esperando rival</span>
         </div>
       </div>
 
-      <!-- FASE 2: No existe combinación -->
-      <div id="phase-no-combo" style="display:none;flex-direction:column;gap:14px;align-items:center;text-align:center;background:var(--card);border:2px solid var(--red);border-radius:16px;padding:24px 20px">
+      <!-- FASE 2: No existe combo -->
+      <div id="phase-no-combo">
         <div style="font-size:32px">❌</div>
         <p style="font-weight:900;font-size:16px;color:var(--red)">¡No existe ese Pokémon!</p>
         <div id="no-combo-types" style="display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap"></div>
-        <p style="color:var(--muted);font-size:13px">Ningún Pokémon tiene esa combinación de tipos.<br>La ronda se reinicia...</p>
+        <p style="color:var(--muted);font-size:13px">Ningún Pokémon tiene esa combinación.<br>La ronda se reinicia...</p>
       </div>
 
-      <!-- FASE 3: Carrera de Pokémon -->
-      <div id="phase-pokemon-race" style="display:none;flex-direction:column;gap:12px;align-items:center;width:100%;max-width:320px">
-        <p id="race-status" style="font-weight:800;font-size:14px;text-align:center;color:var(--muted)">¡Sé el primero en encontrar un Pokémon!</p>
-        <div id="winner-pokemon-display" style="display:none;flex-direction:column;align-items:center;gap:6px">
-          <img id="winner-pokemon-sprite" src="" style="width:90px;height:90px" />
-          <div id="winner-pokemon-name" style="font-weight:900;font-size:16px"></div>
+      <!-- FASE 3: Carrera -->
+      <div id="phase-pokemon-race">
+        <p id="race-status" style="font-weight:800;font-size:14px;text-align:center">⚡ ¡Sé el primero!</p>
+        <div id="winner-pokemon-display">
+          <img id="winner-pokemon-sprite" src="" alt="" />
+          <div id="winner-pokemon-name"></div>
         </div>
-        <div style="position:relative;width:100%">
-          <input type="text" id="pokemon-search-input" placeholder="Buscar Pokémon..." oninput="searchPokemon('pokemon-search-input')" autocomplete="off"
-            style="background:var(--bg3);border:2px solid var(--accent2);border-radius:12px;padding:14px 16px;color:var(--white);font-size:17px;width:100%;font-family:var(--font-body)" />
-          <div id="search-results-race" style="position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-radius:12px;z-index:100;max-height:300px;overflow-y:auto;margin-top:4px"></div>
+        <div class="search-wrap">
+          <input type="text" id="pokemon-search-input" placeholder="Buscar Pokémon..." oninput="searchPokemon()" autocomplete="off" />
+          <div id="search-results-race"></div>
         </div>
         <button id="race-submit-btn" class="btn btn-primary" style="width:100%" onclick="submitPokemon()">⚡ ¡Es este!</button>
       </div>
-
     </div>
 
-    <!-- Opponent -->
+    <!-- Rival -->
     <div class="player-side">
-      <img id="opp-avatar" src="" alt="rival" />
+      <img class="avatar" id="opp-avatar" src="" alt="rival" />
       <div class="p-name" id="opp-name">Rival</div>
-      <div style="font-size:12px;color:var(--muted)">Tipo elegido:</div>
+      <div class="p-pts" id="opp-pts-ingame">⭐ 1000</div>
+      <img class="p-rank" id="opp-rank-ingame" src="" title="rango" />
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Tipo:</div>
       <span class="type-badge" id="opp-type-badge">?</span>
     </div>
   </div>
@@ -1515,30 +1091,27 @@ body {
   <div class="pokeball-hero"></div>
   <div id="result-title" class="win">¡Victoria! 🏆</div>
   <div id="result-score">3 - 1</div>
-  <div id="result-points" style="display:none;color:var(--accent);font-size:20px;font-weight:900"></div>
+  <div id="result-points"></div>
+  <div id="result-abandoned">⚠️ El rival abandonó la partida</div>
   <div class="flex-row">
-    <button class="btn btn-primary" onclick="leaveRoom(); showScreen('menu')">🏠 Menú principal</button>
+    <button class="btn btn-primary" onclick="leaveRoom();showScreen('menu')">🏠 Menú principal</button>
   </div>
 </div>
 
-<!-- Make showScreen global -->
 <script>
 function showScreen(name) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  const el = document.getElementById(`screen-${name}`);
-  if (el) el.classList.add('active');
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById(`screen-${name}`)?.classList.add('active');
 }
 function openAuthModal(tab) {
   document.getElementById('auth-modal').classList.add('open');
   switchAuthTab(tab);
 }
 function switchAuthTab(tab) {
-  document.getElementById('auth-login').style.display = tab === 'login' ? 'flex' : 'none';
-  document.getElementById('auth-register').style.display = tab === 'register' ? 'flex' : 'none';
-  document.getElementById('auth-login').style.flexDirection = 'column';
-  document.getElementById('auth-login').style.gap = '12px';
-  document.getElementById('auth-register').style.flexDirection = 'column';
-  document.getElementById('auth-register').style.gap = '12px';
+  const login = document.getElementById('auth-login');
+  const reg   = document.getElementById('auth-register');
+  login.style.display = tab==='login' ? 'flex' : 'none';
+  reg.style.display   = tab==='register' ? 'flex' : 'none';
 }
 </script>
 
