@@ -237,6 +237,7 @@
       const snap = await get(ref(db, `users/${user.uid}`));
       if (snap.exists()) { currentUserData = snap.val(); updateUserUI(currentUserData); }
       showScreen('menu');
+      loadRanking();
     } else {
       currentUser = null; currentUserData = null;
       showScreen('landing');
@@ -1006,6 +1007,97 @@
     }, delay);
   }
 
+  // ===================== RANKING =====================
+  // Entrenadores bot ficticios para rellenar el ranking hasta que haya 10 jugadores reales
+  const RANKING_BOTS = [
+    { displayName:'Red',          points:2280, wins:187, losses:12,  isBot:true },
+    { displayName:'Blue',         points:2140, wins:165, losses:28,  isBot:true },
+    { displayName:'Gold',         points:2050, wins:152, losses:31,  isBot:true },
+    { displayName:'Leon',         points:1960, wins:141, losses:38,  isBot:true },
+    { displayName:'Cynthia',      points:1820, wins:128, losses:44,  isBot:true },
+    { displayName:'Steven Stone', points:1760, wins:119, losses:50,  isBot:true },
+    { displayName:'Lance',        points:1680, wins:105, losses:58,  isBot:true },
+    { displayName:'Giovanni',     points:1540, wins:89,  losses:67,  isBot:true },
+    { displayName:'Gary Oak',     points:1390, wins:74,  losses:79,  isBot:true },
+    { displayName:'Misty',        points:1230, wins:58,  losses:91,  isBot:true },
+  ];
+
+  async function loadRanking() {
+    const container = document.getElementById('ranking-list');
+    container.innerHTML = '<div class="ranking-loading">Cargando...</div>';
+    try {
+      const snap = await get(ref(db, 'users'));
+      let players = [];
+      if (snap.exists()) {
+        players = Object.entries(snap.val())
+          .map(([uid, d]) => ({ uid, displayName: d.displayName||'Jugador', points: d.points||1000, wins: d.wins||0, losses: d.losses||0, isBot: false }))
+          .filter(p => p.points > 0)
+          .sort((a, b) => b.points - a.points);
+      }
+
+      // Rellenar con bots hasta llegar a 10 entradas
+      const combined = [...players];
+      for (const bot of RANKING_BOTS) {
+        if (combined.length >= 10) break;
+        // Insertar el bot en la posición correcta por puntos
+        const insertAt = combined.findIndex(p => p.points < bot.points);
+        if (insertAt === -1) combined.push(bot);
+        else combined.splice(insertAt, 0, bot);
+        if (combined.length > 10) combined.pop();
+      }
+      const top10 = combined.slice(0, 10);
+
+      container.innerHTML = '';
+      top10.forEach((p, i) => {
+        const isMe = !p.isBot && p.uid === currentUser?.uid;
+        const rank = getRank(p.points);
+        const pos = i + 1;
+        const medal = pos === 1 ? '🥇' : pos === 2 ? '🥈' : pos === 3 ? '🥉' : `#${pos}`;
+
+        const row = document.createElement('div');
+        row.className = `ranking-row${isMe ? ' ranking-me' : ''}${p.isBot ? ' ranking-bot' : ''}`;
+
+        const posEl = document.createElement('div');
+        posEl.className = 'ranking-pos';
+        posEl.textContent = medal;
+
+        const avatar = document.createElement('img');
+        avatar.className = 'ranking-avatar';
+        avatar.src = p.isBot ? getRank(p.points).icon : getAvatar(p.displayName);
+        avatar.alt = '';
+
+        const info = document.createElement('div');
+        info.className = 'ranking-info';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'ranking-name';
+        nameEl.textContent = p.displayName + (p.isBot ? ' 🤖' : '') + (isMe ? ' (tú)' : '');
+        const statsEl = document.createElement('div');
+        statsEl.className = 'ranking-stats';
+        statsEl.textContent = `${p.wins}V · ${p.losses}D`;
+        info.appendChild(nameEl);
+        info.appendChild(statsEl);
+
+        const rankImg = document.createElement('img');
+        rankImg.className = 'ranking-rank-icon';
+        rankImg.src = rank.icon;
+        rankImg.title = rank.name;
+
+        const pts = document.createElement('div');
+        pts.className = 'ranking-pts';
+        pts.textContent = p.points;
+
+        row.appendChild(posEl);
+        row.appendChild(avatar);
+        row.appendChild(info);
+        row.appendChild(rankImg);
+        row.appendChild(pts);
+        container.appendChild(row);
+      });
+    } catch(e) {
+      container.innerHTML = '<div class="ranking-loading">Error al cargar el ranking</div>';
+    }
+  }
+
   window.searchPokemon = () => {
     const input = document.getElementById('pokemon-search-input');
     const query = (input?.value||'').toLowerCase();
@@ -1015,7 +1107,6 @@
     Object.values(POKEMON_TYPES).filter(p=>p.name.includes(query)).slice(0,8).forEach(p => {
       const div = document.createElement('div');
       div.className='search-item';
-      // FIX 7: no usar innerHTML con datos del servidor
       const img = document.createElement('img');
       img.src = p.sprite;
       const nameSpan = document.createElement('span');
@@ -1031,7 +1122,7 @@
   function showScreen(name) {
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     document.getElementById(`screen-${name}`)?.classList.add('active');
-    // FIX 10: gestionar activityPingInterval correctamente en cada pantalla
+    if (name === 'menu') loadRanking();
     if (name === 'game') {
       if (activityPingInterval) clearInterval(activityPingInterval);
       activityPingInterval = setInterval(async () => {
@@ -1041,7 +1132,6 @@
         }
       }, 20000);
     } else {
-      // En cualquier otra pantalla, detener el ping
       if (activityPingInterval) { clearInterval(activityPingInterval); activityPingInterval = null; }
     }
   }
@@ -1234,7 +1324,23 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 .stat-val{font-size:24px;font-weight:900;color:var(--accent);}
 .stat-label{font-size:12px;color:var(--muted);}
 
-/* MODALS */
+/* RANKING */
+.ranking-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:20px;}
+.ranking-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.ranking-loading{padding:20px;text-align:center;color:var(--muted);font-size:14px;}
+.ranking-row{display:grid;grid-template-columns:36px 40px 1fr 28px auto;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);transition:background .15s;}
+.ranking-row:last-child{border-bottom:none;}
+.ranking-row:hover{background:var(--bg3);}
+.ranking-me{background:rgba(59,76,202,.15)!important;border-left:3px solid var(--accent2);}
+.ranking-bot{opacity:0.7;}
+.ranking-pos{font-family:var(--font-pixel);font-size:10px;text-align:center;color:var(--muted);}
+.ranking-avatar{width:36px;height:36px;border-radius:50%;border:2px solid var(--border);}
+.ranking-me .ranking-avatar{border-color:var(--accent2);}
+.ranking-info{min-width:0;}
+.ranking-name{font-weight:900;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ranking-stats{font-size:11px;color:var(--muted);margin-top:2px;}
+.ranking-rank-icon{width:24px;height:24px;justify-self:center;}
+.ranking-pts{font-family:var(--font-pixel);font-size:11px;color:var(--accent);white-space:nowrap;text-align:right;}
 .modal-bg{display:none;position:fixed;inset:0;background:#000a;z-index:500;align-items:center;justify-content:center;}
 .modal-bg.open{display:flex;}
 .modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:400px;width:90%;display:flex;flex-direction:column;gap:16px;}
@@ -1357,7 +1463,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 <!-- ===================== LANDING ===================== -->
 <div class="screen active" id="screen-landing">
-  <div class="version-badge">v0.9.1</div>
+  <div class="version-badge">v0.10.0</div>
   <div class="pokeball-hero"></div>
   <div class="logo"><span>PokeType</span><br>Duel<small>¿Cuánto sabes de tipos?</small></div>
   <div class="flex-row">
@@ -1413,6 +1519,14 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
     <div class="stat"><div class="stat-val user-wins">0</div><div class="stat-label">Victorias</div></div>
     <div class="stat"><div class="stat-val user-points">1000</div><div class="stat-label">Puntos</div></div>
     <div class="stat"><div class="stat-val user-losses">0</div><div class="stat-label">Derrotas</div></div>
+  </div>
+
+  <!-- RANKING -->
+  <div class="ranking-card w-full">
+    <div class="ranking-header">
+      <span style="font-family:var(--font-pixel);font-size:11px;color:var(--accent)">🏆 TOP 10</span>
+    </div>
+    <div id="ranking-list"></div>
   </div>
 </div>
 
