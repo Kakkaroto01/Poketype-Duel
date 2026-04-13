@@ -43,27 +43,91 @@
   // ===================== POKEMON DATA =====================
   const POKEMON_TYPES = {};
 
+  // Formas alternativas, regionales y megas que cambian tipo y no están en los 1025 base
+  const EXTRA_FORMS = [
+    // Alola
+    'rattata-alola','raticate-alola','raichu-alola','sandshrew-alola','sandslash-alola',
+    'vulpix-alola','ninetales-alola','diglett-alola','dugtrio-alola','meowth-alola',
+    'persian-alola','geodude-alola','graveler-alola','golem-alola','grimer-alola',
+    'muk-alola','exeggutor-alola','marowak-alola',
+    // Galar
+    'meowth-galar','ponyta-galar','rapidash-galar','slowpoke-galar','slowbro-galar',
+    'farfetchd-galar','weezing-galar','mr-mime-galar','articuno-galar','zapdos-galar',
+    'moltres-galar','slowking-galar','corsola-galar','zigzagoon-galar','linoone-galar',
+    'darumaka-galar','darmanitan-galar','yamask-galar','stunfisk-galar',
+    // Hisui
+    'growlithe-hisui','arcanine-hisui','voltorb-hisui','electrode-hisui','typhlosion-hisui',
+    'qwilfish-hisui','sneasel-hisui','samurott-hisui','lilligant-hisui','zorua-hisui',
+    'zoroark-hisui','braviary-hisui','sliggoo-hisui','goodra-hisui','avalugg-hisui',
+    'decidueye-hisui',
+    // Paldea
+    'tauros-paldea-combat','tauros-paldea-blaze','tauros-paldea-aqua','wooper-paldea',
+    // Megas con tipo diferente al base
+    'charizard-mega-x','charizard-mega-y','mewtwo-mega-x','mewtwo-mega-y',
+    'ampharos-mega','steelix-mega','scizor-mega','heracross-mega','houndoom-mega',
+    'tyranitar-mega','blaziken-mega','gardevoir-mega','mawile-mega','aggron-mega',
+    'medicham-mega','manectric-mega','sharpedo-mega','camerupt-mega','altaria-mega',
+    'banette-mega','absol-mega','garchomp-mega','lucario-mega','abomasnow-mega',
+    'beedrill-mega','pidgeot-mega','slowbro-mega','gengar-mega','kangaskhan-mega',
+    'pinsir-mega','gyarados-mega','aerodactyl-mega','lopunny-mega','gallade-mega',
+    'audino-mega','diancie-mega','sableye-mega','glalie-mega','latias-mega',
+    'latios-mega','swampert-mega','sceptile-mega',
+    // Formas con tipo distinto
+    'rotom-heat','rotom-wash','rotom-frost','rotom-fan','rotom-mow',
+    'wormadam-sandy','wormadam-trash',
+    'shaymin-sky','giratina-origin',
+    'tornadus-therian','thundurus-therian','landorus-therian',
+    'kyurem-black','kyurem-white',
+    'aegislash-blade','meloetta-pirouette',
+    'zygarde-10','zygarde-complete',
+    'oricorio-pom-pom','oricorio-pau','oricorio-sensu',
+    'lycanroc-midnight','lycanroc-dusk',
+    'wishiwashi-school','minior-meteor',
+    'necrozma-dusk-mane','necrozma-dawn-wings','necrozma-ultra',
+    'calyrex-ice','calyrex-shadow',
+  ];
+
+  async function fetchAndStorePokemon(nameOrUrl) {
+    try {
+      const url = nameOrUrl.startsWith('http')
+        ? nameOrUrl
+        : `https://pokeapi.co/api/v2/pokemon/${nameOrUrl}`;
+      const res = await fetch(url);
+      if (!res.ok) return; // forma no existe en la API, ignorar
+      const pData = await res.json();
+      const displayName = pData.name
+        .split('-')
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+      POKEMON_TYPES[pData.name] = {
+        id: pData.id, name: pData.name,
+        displayName,
+        types: pData.types.map(t => t.type.name),
+        sprite: pData.sprites.front_default || pData.sprites.other?.['official-artwork']?.front_default
+      };
+    } catch(e) { /* ignorar formas que fallen */ }
+  }
+
   async function loadPokemonData() {
     showLoadingOverlay("Cargando Pokédex...");
     try {
+      // 1) Cargar los 1025 Pokémon base en batches
       const total = 1025; const batchSize = 100;
       for (let offset = 0; offset < total; offset += batchSize) {
         const limit = Math.min(batchSize, total - offset);
         const res = await fetch(`https://pokeapi.co/api/v2/pokemon?limit=${limit}&offset=${offset}`);
         const data = await res.json();
-        await Promise.all(data.results.map(async (p) => {
-          const pRes = await fetch(p.url);
-          const pData = await pRes.json();
-          POKEMON_TYPES[pData.name] = {
-            id: pData.id, name: pData.name,
-            displayName: pData.name.charAt(0).toUpperCase() + pData.name.slice(1),
-            types: pData.types.map(t => t.type.name),
-            sprite: pData.sprites.front_default || pData.sprites.other?.['official-artwork']?.front_default
-          };
-        }));
+        await Promise.all(data.results.map(p => fetchAndStorePokemon(p.url)));
+      }
+      // 2) Cargar formas alternativas, regionales y megas en paralelo (batches de 20)
+      showLoadingOverlay("Cargando formas alternativas...");
+      const formBatchSize = 20;
+      for (let i = 0; i < EXTRA_FORMS.length; i += formBatchSize) {
+        const batch = EXTRA_FORMS.slice(i, i + formBatchSize);
+        await Promise.all(batch.map(name => fetchAndStorePokemon(name)));
       }
       hideLoadingOverlay();
-      console.log(`✅ ${Object.keys(POKEMON_TYPES).length} Pokémon cargados`);
+      console.log(`✅ ${Object.keys(POKEMON_TYPES).length} Pokémon cargados (incluyendo formas)`);
     } catch (e) {
       hideLoadingOverlay();
       console.error("Error cargando Pokémon:", e);
@@ -93,9 +157,9 @@
     if (p < 1100) return { name:'Poké Ball',    icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png' };
     if (p < 1300) return { name:'Super Ball',   icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/great-ball.png' };
     if (p < 1500) return { name:'Ultra Ball',   icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/ultra-ball.png' };
-    if (p < 1700) return { name:'Ente Ball',    icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/premier-ball.png' };
+    if (p < 1700) return { name:'Ente Ball',    icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/beast-ball.png' };
     if (p < 2000) return { name:'Master Ball',  icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/master-ball.png' };
-    return               { name:'GS Ball',      icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/gs-ball.png' };
+    return               { name:'Gloria Ball',  icon:'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/cherish-ball.png' };
   }
 
   function calcPoints(isWinner, myRoundsWon, oppRoundsWon) {
@@ -1293,7 +1357,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 <!-- ===================== LANDING ===================== -->
 <div class="screen active" id="screen-landing">
-  <div class="version-badge">v0.8.0</div>
+  <div class="version-badge">v0.9.1</div>
   <div class="pokeball-hero"></div>
   <div class="logo"><span>PokeType</span><br>Duel<small>¿Cuánto sabes de tipos?</small></div>
   <div class="flex-row">
