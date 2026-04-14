@@ -235,7 +235,8 @@
     if (user) {
       currentUser = user;
       const snap = await get(ref(db, `users/${user.uid}`));
-      if (snap.exists()) { currentUserData = snap.val(); updateUserUI(currentUserData); }
+      if (snap.exists()) { currentUserData = snap.val(); updateUserUI(currentUserData); updateProfilePanel(); }
+      await updateRankingNode();
       showScreen('menu');
       loadRanking();
     } else {
@@ -804,7 +805,7 @@
               losses: (d.losses || 0) + (!won && gw ? 1 : 0)
             });
             const updated = await get(ref(db, `users/${currentUser.uid}`));
-            if (updated.exists()) { currentUserData = updated.val(); updateUserUI(currentUserData); }
+            if (updated.exists()) { currentUserData = updated.val(); updateUserUI(currentUserData); await updateRankingNode(); }
           });
         }
       }
@@ -1024,22 +1025,22 @@
 
   async function loadRanking() {
     const container = document.getElementById('ranking-list');
+    if (!container) return;
     container.innerHTML = '<div class="ranking-loading">Cargando...</div>';
     try {
-      const snap = await get(ref(db, 'users'));
+      // Leer desde /ranking (nodo público que cada jugador actualiza al cambiar puntos)
+      const snap = await get(ref(db, 'ranking'));
       let players = [];
       if (snap.exists()) {
         players = Object.entries(snap.val())
-          .map(([uid, d]) => ({ uid, displayName: d.displayName||'Jugador', points: d.points||1000, wins: d.wins||0, losses: d.losses||0, isBot: false }))
-          .filter(p => p.points > 0)
+          .map(([uid, d]) => ({ uid, displayName: d.displayName||'Jugador', points: d.points||1000, wins: d.wins||0, losses: d.losses||0, sprite: d.sprite||null, isBot: false }))
           .sort((a, b) => b.points - a.points);
       }
 
-      // Rellenar con bots hasta llegar a 10 entradas
+      // Rellenar con bots hasta llegar a 10
       const combined = [...players];
       for (const bot of RANKING_BOTS) {
         if (combined.length >= 10) break;
-        // Insertar el bot en la posición correcta por puntos
         const insertAt = combined.findIndex(p => p.points < bot.points);
         if (insertAt === -1) combined.push(bot);
         else combined.splice(insertAt, 0, bot);
@@ -1063,14 +1064,21 @@
 
         const avatar = document.createElement('img');
         avatar.className = 'ranking-avatar';
-        avatar.src = p.isBot ? getRank(p.points).icon : getAvatar(p.displayName);
+        if (p.isBot) {
+          avatar.src = getRank(p.points).icon;
+        } else if (p.sprite) {
+          avatar.src = `https://play.pokemonshowdown.com/sprites/trainers/${p.sprite}.png`;
+        } else {
+          avatar.src = getAvatar(p.displayName);
+        }
         avatar.alt = '';
+        avatar.onerror = () => { avatar.src = getAvatar(p.displayName); };
 
         const info = document.createElement('div');
         info.className = 'ranking-info';
         const nameEl = document.createElement('div');
         nameEl.className = 'ranking-name';
-        nameEl.textContent = p.displayName + (p.isBot ? ' 🤖' : '') + (isMe ? ' (tú)' : '');
+        nameEl.textContent = p.displayName + (p.isBot ? ' 🤖' : '') + (isMe ? ' ★' : '');
         const statsEl = document.createElement('div');
         statsEl.className = 'ranking-stats';
         statsEl.textContent = `${p.wins}V · ${p.losses}D`;
@@ -1094,11 +1102,116 @@
         container.appendChild(row);
       });
     } catch(e) {
-      container.innerHTML = '<div class="ranking-loading">Error al cargar el ranking</div>';
+      container.innerHTML = '<div class="ranking-loading">Error al cargar</div>';
+      console.error('Ranking error:', e);
     }
   }
 
-  window.searchPokemon = () => {
+  // Actualizar nodo /ranking cuando cambian los puntos del jugador
+  async function updateRankingNode() {
+    if (!currentUser || !currentUserData) return;
+    const sprite = currentUserData.sprite || null;
+    await set(ref(db, `ranking/${currentUser.uid}`), {
+      displayName: currentUserData.displayName || currentUser.displayName || 'Jugador',
+      points: currentUserData.points || 1000,
+      wins: currentUserData.wins || 0,
+      losses: currentUserData.losses || 0,
+      ...(sprite ? { sprite } : {})
+    });
+  }
+
+  // ===================== TRAINER SPRITES =====================
+  // Sprites de Pokémon Showdown: https://play.pokemonshowdown.com/sprites/trainers/
+  const TRAINER_SPRITES = [
+    // Protagonistas
+    'red','red-gen1','blue','gold','silver','crystal','brendan','may','lucas','dawn',
+    'hilbert','hilda','nate','rosa','calem','serena','elio','selene','victor','gloria',
+    'florian','juliana',
+    // Líderes de Gimnasio / Campeones
+    'brock','misty','lt-surge','erika','sabrina','koga','blaine','giovanni',
+    'falkner','bugsy','whitney','morty','chuck','jasmine','pryce','clair',
+    'roxanne','brawly','wattson','flannery','norman','winona','tate','liza','wallace','juan',
+    'roark','gardenia','maylene','crasher-wake','fantina','byron','candice','volkner',
+    'cilan','chili','cress','lenora','burgh','elesa','clay','skyla','brycen','drayden','iris',
+    'viola','grant','korrina','ramos','clemont','valerie','olympia','wulfric',
+    'ilima','lana','kiawe','mallow','sophocles','acerola','hapu',
+    'milo','nessa','kabu','bea','allister','opal','gordie','melony','piers','raihan',
+    'katy','brassius','iono','kofu','larry','ryme','tulip','grusha',
+    // Elite 4 y Campeones
+    'lorelei','agatha','lance','cynthia','steven','wallace','alder','iris',
+    'diantha','kukui','leon','geeta','nemona',
+    // Rivales y personajes famosos
+    'gary','silver','brendan','may','barry','bianca','cheren','hugh','shauna','tierno',
+    'trevor','calem','serena','hau','gladion','hop','bede','marnie','arven',
+    // Villanos
+    'team-rocket-grunt','team-rocket-gruntf','archer','ariana','proton','petrel',
+    'cyrus','mars','jupiter','saturn','ghetsis','colress','lysandre','lusamine',
+    'plumeria','guzma','rose','oleana','penny',
+  ];
+
+  window.openProfileEditor = () => {
+    renderSpriteGrid();
+    document.getElementById('profile-modal').classList.add('open');
+  };
+
+  function renderSpriteGrid() {
+    const grid = document.getElementById('sprite-grid');
+    grid.innerHTML = '';
+    const current = currentUserData?.sprite || null;
+    TRAINER_SPRITES.forEach(name => {
+      const btn = document.createElement('button');
+      btn.className = `sprite-btn${name === current ? ' selected' : ''}`;
+      btn.title = name;
+      const img = document.createElement('img');
+      img.src = `https://play.pokemonshowdown.com/sprites/trainers/${name}.png`;
+      img.alt = name;
+      img.onerror = () => { btn.style.display = 'none'; }; // ocultar si no existe
+      btn.appendChild(img);
+      btn.onclick = () => selectSprite(name);
+      grid.appendChild(btn);
+    });
+  }
+
+  async function selectSprite(name) {
+    document.querySelectorAll('.sprite-btn').forEach(b => b.classList.remove('selected'));
+    document.querySelector(`.sprite-btn[title="${name}"]`)?.classList.add('selected');
+    // Guardar en Firebase
+    await update(ref(db, `users/${currentUser.uid}`), { sprite: name });
+    currentUserData = { ...currentUserData, sprite: name };
+    updateProfilePanel();
+    await updateRankingNode();
+  }
+
+  function updateProfilePanel() {
+    const sprite = currentUserData?.sprite;
+    const name   = currentUserData?.displayName || currentUser?.displayName || 'Jugador';
+    const pts    = currentUserData?.points || 1000;
+    const rank   = getRank(pts);
+    const el     = document.getElementById('profile-sprite-img');
+    if (el) {
+      if (sprite) {
+        el.src = `https://play.pokemonshowdown.com/sprites/trainers/${sprite}.png`;
+        el.onerror = () => { el.src = getAvatar(name); };
+      } else {
+        el.src = getAvatar(name);
+      }
+    }
+    const rankEl = document.getElementById('profile-rank-icon');
+    if (rankEl) { rankEl.src = rank.icon; rankEl.title = rank.name; }
+    const rankName = document.getElementById('profile-rank-name');
+    if (rankName) rankName.textContent = rank.name;
+    // También actualizar top-bar avatar con el sprite
+    document.querySelectorAll('.user-avatar').forEach(el => {
+      if (sprite) {
+        el.src = `https://play.pokemonshowdown.com/sprites/trainers/${sprite}.png`;
+        el.onerror = () => { el.src = getAvatar(name); };
+        el.style.borderRadius = '0';
+      } else {
+        el.src = getAvatar(name);
+        el.style.borderRadius = '50%';
+      }
+    });
+  }
     const input = document.getElementById('pokemon-search-input');
     const query = (input?.value||'').toLowerCase();
     const results = document.getElementById('search-results-race');
@@ -1304,43 +1417,63 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 .btn-red{background:var(--red);color:white;}
 .btn-sm{padding:10px 20px;font-size:14px;}
 
-/* MENU */
-#screen-menu{background:radial-gradient(ellipse at 50% 0%,#1a1a5a 0%,var(--bg) 70%);padding:30px 20px;gap:20px;}
-.top-bar{width:100%;max-width:600px;display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;}
-.top-bar img{width:44px;height:44px;border-radius:50%;border:2px solid var(--accent);}
-.top-bar .info{flex:1;}
-.top-bar .info .name{font-weight:900;font-size:16px;}
-.top-bar .info .pts-rank{display:flex;align-items:center;gap:6px;color:var(--accent);font-weight:700;font-size:14px;}
-.top-bar .info .pts-rank img{width:20px;height:20px;}
-.menu-title{font-family:var(--font-pixel);font-size:clamp(14px,3vw,22px);color:var(--accent);text-align:center;text-shadow:2px 2px 0 var(--red);}
-.menu-cards{width:100%;max-width:600px;display:flex;flex-direction:column;gap:16px;}
-.menu-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:20px;}
+/* MENU 3-COLUMN */
+#screen-menu{background:radial-gradient(ellipse at 50% 0%,#1a1a5a 0%,var(--bg) 70%);padding:0;gap:0;align-items:stretch;}
+.menu-topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;background:var(--card);border-bottom:1px solid var(--border);width:100%;}
+.menu-layout{display:grid;grid-template-columns:1fr 320px 1fr;gap:0;width:100%;flex:1;min-height:0;overflow:hidden;}
+.menu-col{padding:20px 16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;}
+.menu-col:first-child{border-right:1px solid var(--border);}
+.menu-col:last-child{border-left:1px solid var(--border);}
+.menu-col-center{padding:24px 20px;align-items:center;justify-content:center;}
+.col-title{font-family:var(--font-pixel);font-size:10px;color:var(--accent);letter-spacing:2px;margin-bottom:4px;}
+.menu-cards{width:100%;display:flex;flex-direction:column;gap:12px;}
+.menu-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:16px;}
 .menu-card:hover{border-color:var(--accent);transform:translateX(4px);}
-.menu-card .icon{font-size:40px;}
-.menu-card .text h3{font-size:20px;font-weight:900;margin-bottom:4px;}
-.menu-card .text p{color:var(--muted);font-size:14px;}
-.stat-bar{width:100%;max-width:600px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 24px;display:flex;gap:30px;justify-content:center;}
-.stat{text-align:center;}
-.stat-val{font-size:24px;font-weight:900;color:var(--accent);}
-.stat-label{font-size:12px;color:var(--muted);}
+.menu-card .icon{font-size:32px;}
+.menu-card .text h3{font-size:17px;font-weight:900;margin-bottom:2px;}
+.menu-card .text p{color:var(--muted);font-size:12px;}
+
+/* PROFILE CARD */
+.profile-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:10px;}
+.profile-sprite-wrap{width:96px;height:96px;display:flex;align-items:center;justify-content:center;}
+.profile-sprite{max-width:96px;max-height:96px;image-rendering:pixelated;cursor:pointer;}
+.profile-name{font-size:17px;font-weight:900;text-align:center;}
+.profile-rank-row{display:flex;align-items:center;gap:8px;}
+.profile-rank-icon{width:28px;height:28px;}
+.profile-rank-name{font-size:13px;font-weight:700;color:var(--muted);}
+.profile-stats{display:flex;gap:16px;margin-top:4px;}
+.pstat{text-align:center;}
+.pstat-val{font-size:20px;font-weight:900;color:var(--accent);}
+.pstat-label{font-size:11px;color:var(--muted);}
+
+/* SPRITE SELECTOR */
+.sprite-btn{background:var(--bg3);border:2px solid transparent;border-radius:8px;padding:4px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;}
+.sprite-btn:hover{border-color:var(--accent2);}
+.sprite-btn.selected{border-color:var(--accent);background:rgba(255,222,0,.1);}
+.sprite-btn img{width:56px;height:56px;image-rendering:pixelated;}
 
 /* RANKING */
-.ranking-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:20px;}
-.ranking-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+.ranking-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
 .ranking-loading{padding:20px;text-align:center;color:var(--muted);font-size:14px;}
-.ranking-row{display:grid;grid-template-columns:36px 40px 1fr 28px auto;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);transition:background .15s;}
+.ranking-row{display:grid;grid-template-columns:28px 36px 1fr 22px auto;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);transition:background .15s;}
 .ranking-row:last-child{border-bottom:none;}
 .ranking-row:hover{background:var(--bg3);}
 .ranking-me{background:rgba(59,76,202,.15)!important;border-left:3px solid var(--accent2);}
-.ranking-bot{opacity:0.7;}
-.ranking-pos{font-family:var(--font-pixel);font-size:10px;text-align:center;color:var(--muted);}
-.ranking-avatar{width:36px;height:36px;border-radius:50%;border:2px solid var(--border);}
-.ranking-me .ranking-avatar{border-color:var(--accent2);}
+.ranking-bot{opacity:0.65;}
+.ranking-pos{font-family:var(--font-pixel);font-size:9px;text-align:center;color:var(--muted);}
+.ranking-avatar{width:32px;height:32px;border-radius:4px;image-rendering:pixelated;}
+.ranking-me .ranking-avatar{outline:2px solid var(--accent2);}
 .ranking-info{min-width:0;}
-.ranking-name{font-weight:900;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.ranking-stats{font-size:11px;color:var(--muted);margin-top:2px;}
-.ranking-rank-icon{width:24px;height:24px;justify-self:center;}
-.ranking-pts{font-family:var(--font-pixel);font-size:11px;color:var(--accent);white-space:nowrap;text-align:right;}
+.ranking-name{font-weight:900;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ranking-stats{font-size:10px;color:var(--muted);margin-top:1px;}
+.ranking-rank-icon{width:20px;height:20px;justify-self:center;}
+.ranking-pts{font-family:var(--font-pixel);font-size:9px;color:var(--accent);white-space:nowrap;text-align:right;}
+
+@media(max-width:900px){
+  .menu-layout{grid-template-columns:1fr;overflow-y:auto;}
+  .menu-col:first-child,.menu-col:last-child{border:none;border-top:1px solid var(--border);}
+  .menu-col-center{order:-1;}
+}
 .modal-bg{display:none;position:fixed;inset:0;background:#000a;z-index:500;align-items:center;justify-content:center;}
 .modal-bg.open{display:flex;}
 .modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:32px;max-width:400px;width:90%;display:flex;flex-direction:column;gap:16px;}
@@ -1463,7 +1596,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 <!-- ===================== LANDING ===================== -->
 <div class="screen active" id="screen-landing">
-  <div class="version-badge">v0.10.0</div>
+  <div class="version-badge">v0.11.0</div>
   <div class="pokeball-hero"></div>
   <div class="logo"><span>PokeType</span><br>Duel<small>¿Cuánto sabes de tipos?</small></div>
   <div class="flex-row">
@@ -1496,37 +1629,68 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 <!-- ===================== MENU ===================== -->
 <div class="screen" id="screen-menu">
-  <div class="top-bar w-full">
-    <img class="user-avatar" src="" alt="avatar" />
-    <div class="info">
-      <div class="name user-name">Jugador</div>
-      <div class="pts-rank">⭐ <span class="user-points">1000</span> <img class="user-rank-icon" src="" title="Rango" /></div>
-    </div>
+  <!-- Top bar -->
+  <div class="menu-topbar">
+    <div class="menu-logo" style="font-family:var(--font-pixel);font-size:13px;color:var(--accent);text-shadow:2px 2px 0 var(--red)">PokeType Duel</div>
     <button class="btn btn-secondary btn-sm" onclick="logout()">Salir</button>
   </div>
-  <div class="menu-title">— ELIGE MODO —</div>
-  <div class="menu-cards">
-    <div class="menu-card" onclick="document.getElementById('private-modal').classList.add('open')">
-      <div class="icon">🔒</div>
-      <div class="text"><h3>Sala Privada</h3><p>Juega con amigos por código · Sin puntos</p></div>
-    </div>
-    <div class="menu-card" onclick="startMatchmaking()">
-      <div class="icon">⚔️</div>
-      <div class="text"><h3>Matchmaking</h3><p>Enfréntate a rivales o entrenadores IA · Gana o pierde puntos</p></div>
-    </div>
-  </div>
-  <div class="stat-bar w-full">
-    <div class="stat"><div class="stat-val user-wins">0</div><div class="stat-label">Victorias</div></div>
-    <div class="stat"><div class="stat-val user-points">1000</div><div class="stat-label">Puntos</div></div>
-    <div class="stat"><div class="stat-val user-losses">0</div><div class="stat-label">Derrotas</div></div>
-  </div>
 
-  <!-- RANKING -->
-  <div class="ranking-card w-full">
-    <div class="ranking-header">
-      <span style="font-family:var(--font-pixel);font-size:11px;color:var(--accent)">🏆 TOP 10</span>
+  <!-- 3 columns -->
+  <div class="menu-layout">
+
+    <!-- LEFT: Ranking -->
+    <div class="menu-col">
+      <div class="col-title">🏆 TOP 10</div>
+      <div class="ranking-card">
+        <div id="ranking-list"></div>
+      </div>
     </div>
-    <div id="ranking-list"></div>
+
+    <!-- CENTER: Modos -->
+    <div class="menu-col menu-col-center">
+      <div class="col-title">⚔️ JUGAR</div>
+      <div class="menu-cards">
+        <div class="menu-card" onclick="document.getElementById('private-modal').classList.add('open')">
+          <div class="icon">🔒</div>
+          <div class="text"><h3>Sala Privada</h3><p>Con amigos · Sin puntos</p></div>
+        </div>
+        <div class="menu-card" onclick="startMatchmaking()">
+          <div class="icon">⚔️</div>
+          <div class="text"><h3>Matchmaking</h3><p>Rivales o IA · Con puntos</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Perfil -->
+    <div class="menu-col">
+      <div class="col-title">👤 PERFIL</div>
+      <div class="profile-card">
+        <div class="profile-sprite-wrap">
+          <img id="profile-sprite-img" src="" alt="sprite" class="profile-sprite" />
+        </div>
+        <div class="profile-name user-name">Jugador</div>
+        <div class="profile-rank-row">
+          <img id="profile-rank-icon" src="" class="profile-rank-icon" />
+          <span id="profile-rank-name" class="profile-rank-name"></span>
+        </div>
+        <div class="profile-stats">
+          <div class="pstat"><div class="pstat-val user-points">1000</div><div class="pstat-label">Puntos</div></div>
+          <div class="pstat"><div class="pstat-val user-wins">0</div><div class="pstat-label">Victorias</div></div>
+          <div class="pstat"><div class="pstat-val user-losses">0</div><div class="pstat-label">Derrotas</div></div>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="width:100%;margin-top:8px" onclick="openProfileEditor()">🎨 Cambiar entrenador</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- PROFILE EDITOR MODAL -->
+<div class="modal-bg" id="profile-modal">
+  <div class="modal" style="max-width:560px;max-height:80vh">
+    <h3>Elige tu entrenador</h3>
+    <div id="sprite-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px;overflow-y:auto;max-height:50vh;padding:4px"></div>
+    <button class="btn btn-secondary btn-sm" onclick="document.getElementById('profile-modal').classList.remove('open')">Cerrar</button>
   </div>
 </div>
 
