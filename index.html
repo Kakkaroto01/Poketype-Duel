@@ -198,17 +198,19 @@
     const email    = document.getElementById('reg-email').value.trim();
     const password = document.getElementById('reg-password').value;
     if (!username||!email||!password) return showToast('Rellena todos los campos');
-    // FIX 8: validar nombre de usuario
     if (!isValidUsername(username)) return showToast('Nombre inválido (2-20 caracteres, sin símbolos)');
     if (password.length < 6) return showToast('Mínimo 6 caracteres');
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       await updateProfile(result.user, { displayName: username });
-      await set(ref(db, `users/${result.user.uid}`), { displayName: username, points:1000, wins:0, losses:0, createdAt: Date.now() });
+      try {
+        await set(ref(db, `users/${result.user.uid}`), { displayName: username, points:1000, wins:0, losses:0, createdAt: Date.now() });
+      } catch(dbErr) { console.warn('DB write failed (rules?):', dbErr.code); }
       document.getElementById('auth-modal').classList.remove('open');
+      // onAuthStateChanged se encarga del resto
     } catch(e) {
       const msgs = {'auth/email-already-in-use':'Correo ya registrado','auth/invalid-email':'Correo no válido','auth/weak-password':'Contraseña débil'};
-      showToast(msgs[e.code]||'Error al registrarse');
+      showToast(msgs[e.code]||'Error al registrarse: ' + (e.code||e.message));
     }
   };
 
@@ -234,9 +236,23 @@
   onAuthStateChanged(auth, async (user) => {
     if (user) {
       currentUser = user;
-      const snap = await get(ref(db, `users/${user.uid}`));
-      if (snap.exists()) { currentUserData = snap.val(); updateUserUI(currentUserData); updateProfilePanel(); }
-      await updateRankingNode();
+      try {
+        const snap = await get(ref(db, `users/${user.uid}`));
+        if (snap.exists()) {
+          currentUserData = snap.val();
+        } else {
+          // Usuario nuevo: crear datos por defecto
+          currentUserData = { displayName: user.displayName||'Jugador', points:1000, wins:0, losses:0, createdAt: Date.now() };
+          await set(ref(db, `users/${user.uid}`), currentUserData);
+        }
+        updateUserUI(currentUserData);
+        updateProfilePanel();
+        await updateRankingNode();
+      } catch(e) {
+        console.error('Error cargando datos de usuario:', e);
+        // Continuar aunque falle — mostrar menú igualmente
+        currentUserData = currentUserData || { displayName: user.displayName||'Jugador', points:1000, wins:0, losses:0 };
+      }
       showScreen('menu');
       loadRanking();
     } else {
@@ -1110,14 +1126,16 @@
   // Actualizar nodo /ranking cuando cambian los puntos del jugador
   async function updateRankingNode() {
     if (!currentUser || !currentUserData) return;
-    const sprite = currentUserData.sprite || null;
-    await set(ref(db, `ranking/${currentUser.uid}`), {
-      displayName: currentUserData.displayName || currentUser.displayName || 'Jugador',
-      points: currentUserData.points || 1000,
-      wins: currentUserData.wins || 0,
-      losses: currentUserData.losses || 0,
-      ...(sprite ? { sprite } : {})
-    });
+    try {
+      const sprite = currentUserData.sprite || null;
+      await set(ref(db, `ranking/${currentUser.uid}`), {
+        displayName: currentUserData.displayName || currentUser.displayName || 'Jugador',
+        points: currentUserData.points || 1000,
+        wins: currentUserData.wins || 0,
+        losses: currentUserData.losses || 0,
+        ...(sprite ? { sprite } : {})
+      });
+    } catch(e) { console.warn('updateRankingNode failed:', e.code || e.message); }
   }
 
   // ===================== TRAINER SPRITES =====================
@@ -1596,7 +1614,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 <!-- ===================== LANDING ===================== -->
 <div class="screen active" id="screen-landing">
-  <div class="version-badge">v0.11.0</div>
+  <div class="version-badge">v0.11.1</div>
   <div class="pokeball-hero"></div>
   <div class="logo"><span>PokeType</span><br>Duel<small>¿Cuánto sabes de tipos?</small></div>
   <div class="flex-row">
