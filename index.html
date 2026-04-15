@@ -1230,6 +1230,8 @@
       }
     });
   }
+
+  window.searchPokemon = () => {
     const input = document.getElementById('pokemon-search-input');
     const query = (input?.value||'').toLowerCase();
     const results = document.getElementById('search-results-race');
@@ -1266,6 +1268,18 @@
       if (activityPingInterval) { clearInterval(activityPingInterval); activityPingInterval = null; }
     }
   }
+  // Exponer showScreen, openAuthModal y switchAuthTab en window para que el HTML pueda llamarlas
+  window.showScreen = showScreen;
+  window.openAuthModal = (tab) => {
+    document.getElementById('auth-modal').classList.add('open');
+    window.switchAuthTab(tab);
+  };
+  window.switchAuthTab = (tab) => {
+    const login = document.getElementById('auth-login');
+    const reg   = document.getElementById('auth-register');
+    login.style.display = tab==='login' ? 'flex' : 'none';
+    reg.style.display   = tab==='register' ? 'flex' : 'none';
+  };
 
   function showToast(msg) {
     const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
@@ -1614,7 +1628,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 <!-- ===================== LANDING ===================== -->
 <div class="screen active" id="screen-landing">
-  <div class="version-badge">v0.11.1</div>
+  <div class="version-badge">v0.11.2</div>
   <div class="pokeball-hero"></div>
   <div class="logo"><span>PokeType</span><br>Duel<small>¿Cuánto sabes de tipos?</small></div>
   <div class="flex-row">
@@ -1882,22 +1896,6 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
   </div>
 </div>
 
-<script>
-function showScreen(name) {
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  document.getElementById(`screen-${name}`)?.classList.add('active');
-}
-function openAuthModal(tab) {
-  document.getElementById('auth-modal').classList.add('open');
-  switchAuthTab(tab);
-}
-function switchAuthTab(tab) {
-  const login = document.getElementById('auth-login');
-  const reg   = document.getElementById('auth-register');
-  login.style.display = tab==='login' ? 'flex' : 'none';
-  reg.style.display   = tab==='register' ? 'flex' : 'none';
-}
-</script>
 
 </body>
 </html>
