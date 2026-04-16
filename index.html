@@ -247,6 +247,7 @@
         }
         updateUserUI(currentUserData);
         updateProfilePanel();
+        renderAchievements(currentUserData);
         await updateRankingNode();
       } catch(e) {
         console.error('Error cargando datos de usuario:', e);
@@ -277,16 +278,36 @@
     return `https://ui-avatars.com/api/?name=${encodeURIComponent(name||'U')}&background=3b4cca&color=ffde00&bold=true`;
   }
 
+  // Devuelve la URL del sprite del entrenador: usa Showdown si tiene sprite, sino ui-avatars
+  function getSpriteUrl(playerData) {
+    if (playerData?.sprite) return `https://play.pokemonshowdown.com/sprites/trainers/${playerData.sprite}.png`;
+    if (playerData?.name) return getAvatar(playerData.name);
+    return getAvatar('U');
+  }
+
+  // Obtener datos del jugador actual para incluir en la sala
+  function getMyPlayerData() {
+    const name = currentUser?.displayName || 'Jugador';
+    const sprite = currentUserData?.sprite || null;
+    return {
+      name,
+      photo: sprite ? `https://play.pokemonshowdown.com/sprites/trainers/${sprite}.png` : getAvatar(name),
+      sprite: sprite || null,
+      points: currentUserData?.points || 1000,
+      lastActive: Date.now()
+    };
+  }
+
   // ===================== ROOMS =====================
   window.createPrivateRoom = async () => {
     const code = Math.random().toString(36).substr(2,6).toUpperCase();
-    const myName = currentUser.displayName||'Jugador';
+    const me = getMyPlayerData();
     await set(ref(db, `rooms/${code}`), {
       code, type:'private', host: currentUser.uid,
       status:'waiting',
-      players:{ [currentUser.uid]:{ name:myName, photo:getAvatar(myName), points:currentUserData?.points||1000, lastActive:Date.now() } },
+      players:{ [currentUser.uid]: me },
       rounds:[], currentRound:0,
-      createdAt: Date.now(), lastActivity: Date.now()  // FIX 2: usar Date.now() en vez de serverTimestamp para poder comparar
+      createdAt: Date.now(), lastActivity: Date.now()
     });
     currentRoomId = code; isHost = true;
     opponentLeftHandled = false;
@@ -304,8 +325,8 @@
     const room = snap.val();
     if (room.status !== 'waiting') return showToast('La partida ya comenzó');
     if (Object.keys(room.players||{}).length >= 2) return showToast('Sala llena');
-    const myName = currentUser.displayName||'Jugador';
-    await update(ref(db, `rooms/${code}/players/${currentUser.uid}`), { name:myName, photo:getAvatar(myName), points:currentUserData?.points||1000, lastActive:Date.now() });
+    const me = getMyPlayerData();
+    await update(ref(db, `rooms/${code}/players/${currentUser.uid}`), me);
     currentRoomId = code; isHost = false;
     opponentLeftHandled = false;
     listenToRoom(code);
@@ -320,8 +341,7 @@
     const snap = await get(ref(db, 'matchmaking/queue'));
     const queue = snap.val()||{};
     const waiting = Object.entries(queue).find(([uid]) => uid !== currentUser.uid);
-    const myName = currentUser.displayName||'Jugador';
-    const myPts  = currentUserData?.points || 1000;
+    const me = getMyPlayerData();
 
     if (waiting) {
       const [opponentUid, opponentData] = waiting;
@@ -330,8 +350,8 @@
       await set(ref(db, `rooms/${code}`), {
         code, type:'matchmaking', status:'preview',
         players:{
-          [currentUser.uid]:{ name:myName, photo:getAvatar(myName), points:myPts, lastActive:Date.now() },
-          [opponentUid]:{ name:opponentData.name, photo:opponentData.photo, points:opponentData.points||1000, lastActive:Date.now() }
+          [currentUser.uid]: me,
+          [opponentUid]:{ name:opponentData.name, photo:opponentData.photo, sprite:opponentData.sprite||null, points:opponentData.points||1000, lastActive:Date.now() }
         },
         rounds:[], currentRound:0,
         createdAt:Date.now(), lastActivity:Date.now()
@@ -345,14 +365,14 @@
         await update(ref(db, `rooms/${code}`), { status:'playing', currentRound:1, roundPhase:'type_selection', lastActivity:Date.now() });
       }, 5000);
     } else {
-      await set(ref(db, `matchmaking/queue/${currentUser.uid}`), { name:myName, photo:getAvatar(myName), points:myPts, joinedAt:Date.now() });
+      await set(ref(db, `matchmaking/queue/${currentUser.uid}`), { ...me, joinedAt:Date.now() });
 
       // FIX 14: guardar referencia al timer para poder cancelarlo
       botFallbackTimer = setTimeout(async () => {
         if (!document.getElementById('screen-matchmaking')?.classList.contains('active')) return;
         if (matchmakingListener) { matchmakingListener(); matchmakingListener = null; }
         await remove(ref(db, `matchmaking/queue/${currentUser.uid}`));
-        await _startBotGame(myPts, myName);
+        await _startBotGame(me.points, me.name);
       }, 8000);
 
       // FIX 12: escuchar solo la cola de matchmaking, no toda /rooms
@@ -383,12 +403,14 @@
     const candidates = BOT_TRAINERS.filter(b => Math.abs(b.rank - myPts) < 400);
     const bot = candidates.length ? candidates[Math.floor(Math.random()*candidates.length)] : BOT_TRAINERS[Math.floor(BOT_TRAINERS.length/2)];
     const code = 'BOT_' + Math.random().toString(36).substr(2,6).toUpperCase();
+    const botSpriteUrl = `https://play.pokemonshowdown.com/sprites/trainers/${bot.sprite}.png`;
+    const me = getMyPlayerData();
     isBotGame = true; botData = bot; botTypesUsed = []; botPlayingRound = null;
     await set(ref(db, `rooms/${code}`), {
       code, type:'matchmaking', isBot:true, status:'preview',
       players:{
-        [currentUser.uid]:{ name:myName, photo:getAvatar(myName), points:myPts, lastActive:Date.now() },
-        'BOT':{ name:bot.name, photo:getAvatar(bot.name), points:bot.rank, lastActive:Date.now(), isBot:true }
+        [currentUser.uid]: me,
+        'BOT':{ name:bot.name, photo:botSpriteUrl, sprite:bot.sprite, points:bot.rank, lastActive:Date.now(), isBot:true }
       },
       rounds:[], currentRound:0,
       createdAt:Date.now(), lastActivity:Date.now()
@@ -472,14 +494,23 @@
     const me  = players.find(([uid]) => uid === currentUser.uid);
     const opp = players.find(([uid]) => uid !== currentUser.uid);
     if (!me||!opp) return;
-    document.getElementById('preview-my-name').textContent    = me[1].name;
-    document.getElementById('preview-my-avatar').src          = me[1].photo||getAvatar(me[1].name);
-    document.getElementById('preview-my-pts').textContent     = `⭐ ${me[1].points||1000}`;
-    document.getElementById('preview-my-rank').src            = getRank(me[1].points||1000).icon;
-    document.getElementById('preview-opp-name').textContent   = opp[1].name;
-    document.getElementById('preview-opp-avatar').src         = opp[1].photo||getAvatar(opp[1].name);
-    document.getElementById('preview-opp-pts').textContent    = `⭐ ${opp[1].points||1000}`;
-    document.getElementById('preview-opp-rank').src           = getRank(opp[1].points||1000).icon;
+    document.getElementById('preview-my-name').textContent  = me[1].name;
+    document.getElementById('preview-my-pts').textContent   = `⭐ ${me[1].points||1000}`;
+    document.getElementById('preview-my-rank').src          = getRank(me[1].points||1000).icon;
+    document.getElementById('preview-opp-name').textContent = opp[1].name;
+    document.getElementById('preview-opp-pts').textContent  = `⭐ ${opp[1].points||1000}`;
+    document.getElementById('preview-opp-rank').src         = getRank(opp[1].points||1000).icon;
+    // Sprites
+    const myAvEl  = document.getElementById('preview-my-avatar');
+    const oppAvEl = document.getElementById('preview-opp-avatar');
+    myAvEl.src  = getSpriteUrl(me[1]);
+    oppAvEl.src = getSpriteUrl(opp[1]);
+    const hasMyS  = !!me[1]?.sprite;
+    const hasOppS = !!opp[1]?.sprite;
+    myAvEl.style.borderRadius  = hasMyS  ? '4px' : '50%';
+    oppAvEl.style.borderRadius = hasOppS ? '4px' : '50%';
+    myAvEl.style.imageRendering  = hasMyS  ? 'pixelated' : 'auto';
+    oppAvEl.style.imageRendering = hasOppS ? 'pixelated' : 'auto';
   }
 
   window.startGame = async () => {
@@ -500,9 +531,9 @@
     players.forEach(([uid, p]) => {
       const div = document.createElement('div');
       div.className = 'lobby-player';
-      // FIX 7: usar textContent / setAttribute en vez de innerHTML con datos de usuario
       const img = document.createElement('img');
-      img.src = p.photo||getAvatar(p.name);
+      img.src = getSpriteUrl(p);
+      if (p.sprite) { img.style.borderRadius = '4px'; img.style.imageRendering = 'pixelated'; }
       const nameEl = document.createElement('span');
       nameEl.textContent = p.name;
       div.appendChild(img);
@@ -534,8 +565,21 @@
     document.getElementById('game-round').textContent = `Ronda ${round}/5`;
     document.getElementById('my-wins').textContent  = myWins;
     document.getElementById('opp-wins').textContent = oppWins;
-    document.getElementById('my-avatar').src   = me[1].photo||'';
-    document.getElementById('opp-avatar').src  = opponent[1].photo||'';
+
+    // Sprites de entrenador
+    const mySprite  = getSpriteUrl(me[1]);
+    const oppSprite = getSpriteUrl(opponent[1]);
+    const myAv  = document.getElementById('my-avatar');
+    const oppAv = document.getElementById('opp-avatar');
+    myAv.src  = mySprite;
+    oppAv.src = oppSprite;
+    // Si tiene sprite de Showdown, estilo pixelado; si no, circular
+    const hasMySprite  = !!me[1]?.sprite;
+    const hasOppSprite = !!opponent[1]?.sprite;
+    myAv.style.borderRadius  = hasMySprite  ? '4px' : '50%';
+    oppAv.style.borderRadius = hasOppSprite ? '4px' : '50%';
+    myAv.style.imageRendering  = hasMySprite  ? 'pixelated' : 'auto';
+    oppAv.style.imageRendering = hasOppSprite ? 'pixelated' : 'auto';
     // FIX 7: usar textContent para datos de usuario
     document.getElementById('my-name').textContent  = me[1].name;
     document.getElementById('opp-name').textContent = opponent[1].name;
@@ -905,30 +949,30 @@
 
   // ===================== BOT SYSTEM =====================
   const BOT_TRAINERS = [
-    { name:'Joey',          rank:700,  typeDelay:12, pokemonDelay:22, accuracy:0.40 },
-    { name:'Youngster',     rank:750,  typeDelay:11, pokemonDelay:20, accuracy:0.45 },
-    { name:'Bug Catcher',   rank:800,  typeDelay:10, pokemonDelay:18, accuracy:0.50 },
-    { name:'Ash Ketchum',   rank:900,  typeDelay:8,  pokemonDelay:16, accuracy:0.58 },
-    { name:'May',           rank:950,  typeDelay:7,  pokemonDelay:15, accuracy:0.62 },
-    { name:'Dawn',          rank:1000, typeDelay:7,  pokemonDelay:14, accuracy:0.65 },
-    { name:'Serena',        rank:1050, typeDelay:6,  pokemonDelay:13, accuracy:0.68 },
-    { name:'Brock',         rank:1150, typeDelay:6,  pokemonDelay:12, accuracy:0.72 },
-    { name:'Misty',         rank:1200, typeDelay:5,  pokemonDelay:11, accuracy:0.75 },
-    { name:'Tracey',        rank:1250, typeDelay:5,  pokemonDelay:10, accuracy:0.78 },
-    { name:'Gary Oak',      rank:1350, typeDelay:4,  pokemonDelay:9,  accuracy:0.82 },
-    { name:'Brendan',       rank:1400, typeDelay:4,  pokemonDelay:8,  accuracy:0.85 },
-    { name:'Lucas',         rank:1450, typeDelay:4,  pokemonDelay:8,  accuracy:0.87 },
-    { name:'Giovanni',      rank:1550, typeDelay:3,  pokemonDelay:7,  accuracy:0.90 },
-    { name:'Archie',        rank:1600, typeDelay:3,  pokemonDelay:6,  accuracy:0.91 },
-    { name:'Maxie',         rank:1650, typeDelay:3,  pokemonDelay:6,  accuracy:0.92 },
-    { name:'Lance',         rank:1750, typeDelay:2,  pokemonDelay:5,  accuracy:0.94 },
-    { name:'Cynthia',       rank:1800, typeDelay:2,  pokemonDelay:5,  accuracy:0.96 },
-    { name:'Steven Stone',  rank:1850, typeDelay:2,  pokemonDelay:4,  accuracy:0.97 },
-    { name:'Diantha',       rank:1900, typeDelay:2,  pokemonDelay:4,  accuracy:0.97 },
-    { name:'Leon',          rank:1950, typeDelay:2,  pokemonDelay:4,  accuracy:0.98 },
-    { name:'Red',           rank:2050, typeDelay:1,  pokemonDelay:3,  accuracy:0.99 },
-    { name:'Gold',          rank:2100, typeDelay:1,  pokemonDelay:3,  accuracy:0.99 },
-    { name:'Blue',          rank:2150, typeDelay:1,  pokemonDelay:2,  accuracy:1.00 },
+    { name:'Joey',          rank:700,  typeDelay:12, pokemonDelay:22, accuracy:0.40, sprite:'youngster'       },
+    { name:'Youngster',     rank:750,  typeDelay:11, pokemonDelay:20, accuracy:0.45, sprite:'youngster'       },
+    { name:'Bug Catcher',   rank:800,  typeDelay:10, pokemonDelay:18, accuracy:0.50, sprite:'bugcatcher'      },
+    { name:'Ash Ketchum',   rank:900,  typeDelay:8,  pokemonDelay:16, accuracy:0.58, sprite:'red'             },
+    { name:'May',           rank:950,  typeDelay:7,  pokemonDelay:15, accuracy:0.62, sprite:'may'             },
+    { name:'Dawn',          rank:1000, typeDelay:7,  pokemonDelay:14, accuracy:0.65, sprite:'dawn'            },
+    { name:'Serena',        rank:1050, typeDelay:6,  pokemonDelay:13, accuracy:0.68, sprite:'serena'          },
+    { name:'Brock',         rank:1150, typeDelay:6,  pokemonDelay:12, accuracy:0.72, sprite:'brock'           },
+    { name:'Misty',         rank:1200, typeDelay:5,  pokemonDelay:11, accuracy:0.75, sprite:'misty'           },
+    { name:'Tracey',        rank:1250, typeDelay:5,  pokemonDelay:10, accuracy:0.78, sprite:'acetrainer'      },
+    { name:'Gary Oak',      rank:1350, typeDelay:4,  pokemonDelay:9,  accuracy:0.82, sprite:'gary'            },
+    { name:'Brendan',       rank:1400, typeDelay:4,  pokemonDelay:8,  accuracy:0.85, sprite:'brendan'         },
+    { name:'Lucas',         rank:1450, typeDelay:4,  pokemonDelay:8,  accuracy:0.87, sprite:'lucas'           },
+    { name:'Giovanni',      rank:1550, typeDelay:3,  pokemonDelay:7,  accuracy:0.90, sprite:'giovanni'        },
+    { name:'Archie',        rank:1600, typeDelay:3,  pokemonDelay:6,  accuracy:0.91, sprite:'archie'          },
+    { name:'Maxie',         rank:1650, typeDelay:3,  pokemonDelay:6,  accuracy:0.92, sprite:'maxie'           },
+    { name:'Lance',         rank:1750, typeDelay:2,  pokemonDelay:5,  accuracy:0.94, sprite:'lance'           },
+    { name:'Cynthia',       rank:1800, typeDelay:2,  pokemonDelay:5,  accuracy:0.96, sprite:'cynthia'         },
+    { name:'Steven Stone',  rank:1850, typeDelay:2,  pokemonDelay:4,  accuracy:0.97, sprite:'steven'          },
+    { name:'Diantha',       rank:1900, typeDelay:2,  pokemonDelay:4,  accuracy:0.97, sprite:'diantha'         },
+    { name:'Leon',          rank:1950, typeDelay:2,  pokemonDelay:4,  accuracy:0.98, sprite:'leon'            },
+    { name:'Red',           rank:2050, typeDelay:1,  pokemonDelay:3,  accuracy:0.99, sprite:'red'             },
+    { name:'Gold',          rank:2100, typeDelay:1,  pokemonDelay:3,  accuracy:0.99, sprite:'gold'            },
+    { name:'Blue',          rank:2150, typeDelay:1,  pokemonDelay:2,  accuracy:1.00, sprite:'blue'            },
   ];
 
   let botTimeout = null;
@@ -1027,16 +1071,16 @@
   // ===================== RANKING =====================
   // Entrenadores bot ficticios para rellenar el ranking hasta que haya 10 jugadores reales
   const RANKING_BOTS = [
-    { displayName:'Red',          points:2280, wins:187, losses:12,  isBot:true },
-    { displayName:'Blue',         points:2140, wins:165, losses:28,  isBot:true },
-    { displayName:'Gold',         points:2050, wins:152, losses:31,  isBot:true },
-    { displayName:'Leon',         points:1960, wins:141, losses:38,  isBot:true },
-    { displayName:'Cynthia',      points:1820, wins:128, losses:44,  isBot:true },
-    { displayName:'Steven Stone', points:1760, wins:119, losses:50,  isBot:true },
-    { displayName:'Lance',        points:1680, wins:105, losses:58,  isBot:true },
-    { displayName:'Giovanni',     points:1540, wins:89,  losses:67,  isBot:true },
-    { displayName:'Gary Oak',     points:1390, wins:74,  losses:79,  isBot:true },
-    { displayName:'Misty',        points:1230, wins:58,  losses:91,  isBot:true },
+    { displayName:'Red',          points:2280, wins:187, losses:12,  isBot:true, sprite:'red'      },
+    { displayName:'Blue',         points:2140, wins:165, losses:28,  isBot:true, sprite:'blue'     },
+    { displayName:'Gold',         points:2050, wins:152, losses:31,  isBot:true, sprite:'gold'     },
+    { displayName:'Leon',         points:1960, wins:141, losses:38,  isBot:true, sprite:'leon'     },
+    { displayName:'Cynthia',      points:1820, wins:128, losses:44,  isBot:true, sprite:'cynthia'  },
+    { displayName:'Steven Stone', points:1760, wins:119, losses:50,  isBot:true, sprite:'steven'   },
+    { displayName:'Lance',        points:1680, wins:105, losses:58,  isBot:true, sprite:'lance'    },
+    { displayName:'Giovanni',     points:1540, wins:89,  losses:67,  isBot:true, sprite:'giovanni' },
+    { displayName:'Gary Oak',     points:1390, wins:74,  losses:79,  isBot:true, sprite:'gary'     },
+    { displayName:'Misty',        points:1230, wins:58,  losses:91,  isBot:true, sprite:'misty'    },
   ];
 
   async function loadRanking() {
@@ -1081,40 +1125,43 @@
         const avatar = document.createElement('img');
         avatar.className = 'ranking-avatar';
         if (p.isBot) {
-          avatar.src = getRank(p.points).icon;
+          avatar.src = `https://play.pokemonshowdown.com/sprites/trainers/${RANKING_BOTS.find(b=>b.displayName===p.displayName)?.sprite||'red'}.png`;
         } else if (p.sprite) {
           avatar.src = `https://play.pokemonshowdown.com/sprites/trainers/${p.sprite}.png`;
         } else {
           avatar.src = getAvatar(p.displayName);
+          avatar.style.borderRadius = '50%';
         }
         avatar.alt = '';
-        avatar.onerror = () => { avatar.src = getAvatar(p.displayName); };
+        avatar.onerror = () => { avatar.src = getAvatar(p.displayName); avatar.style.borderRadius='50%'; };
 
         const info = document.createElement('div');
         info.className = 'ranking-info';
         const nameEl = document.createElement('div');
         nameEl.className = 'ranking-name';
         nameEl.textContent = p.displayName + (p.isBot ? ' 🤖' : '') + (isMe ? ' ★' : '');
-        const statsEl = document.createElement('div');
-        statsEl.className = 'ranking-stats';
-        statsEl.textContent = `${p.wins}V · ${p.losses}D`;
-        info.appendChild(nameEl);
-        info.appendChild(statsEl);
-
         const rankImg = document.createElement('img');
         rankImg.className = 'ranking-rank-icon';
         rankImg.src = rank.icon;
         rankImg.title = rank.name;
+        info.appendChild(nameEl);
+        info.appendChild(rankImg);
 
+        const ptsCol = document.createElement('div');
+        ptsCol.className = 'ranking-pts-col';
         const pts = document.createElement('div');
         pts.className = 'ranking-pts';
         pts.textContent = p.points;
+        const stats = document.createElement('div');
+        stats.className = 'ranking-stats';
+        stats.textContent = `${p.wins}V·${p.losses}D`;
+        ptsCol.appendChild(pts);
+        ptsCol.appendChild(stats);
 
         row.appendChild(posEl);
         row.appendChild(avatar);
         row.appendChild(info);
-        row.appendChild(rankImg);
-        row.appendChild(pts);
+        row.appendChild(ptsCol);
         container.appendChild(row);
       });
     } catch(e) {
@@ -1138,7 +1185,65 @@
     } catch(e) { console.warn('updateRankingNode failed:', e.code || e.message); }
   }
 
-  // ===================== TRAINER SPRITES =====================
+  // ===================== LOGROS =====================
+  const ACHIEVEMENTS = [
+    // Primeras victorias
+    { id:'first_win',      icon:'🏅', title:'Primera Sangre',     desc:'Gana tu primera partida',                check: d => d.wins >= 1 },
+    { id:'wins_10',        icon:'🥊', title:'Entrenador Serio',   desc:'Gana 10 partidas',                       check: d => d.wins >= 10 },
+    { id:'wins_50',        icon:'🔥', title:'Veterano',           desc:'Gana 50 partidas',                       check: d => d.wins >= 50 },
+    { id:'wins_100',       icon:'👑', title:'Maestro Pokémon',    desc:'Gana 100 partidas',                      check: d => d.wins >= 100 },
+    // Puntos
+    { id:'pts_1100',       icon:'🎯', title:'Super Entrenador',   desc:'Alcanza 1100 puntos (Super Ball)',        check: d => (d.points||1000) >= 1100 },
+    { id:'pts_1300',       icon:'⚡', title:'Ultra Entrenador',   desc:'Alcanza 1300 puntos (Ultra Ball)',        check: d => (d.points||1000) >= 1300 },
+    { id:'pts_1500',       icon:'🌀', title:'Maestro de las Bestias', desc:'Alcanza 1500 puntos (Ente Ball)',    check: d => (d.points||1000) >= 1500 },
+    { id:'pts_1700',       icon:'🟣', title:'Capturador Maestro', desc:'Alcanza 1700 puntos (Master Ball)',      check: d => (d.points||1000) >= 1700 },
+    { id:'pts_2000',       icon:'✨', title:'La Gloria',          desc:'Alcanza 2000 puntos (Gloria Ball)',       check: d => (d.points||1000) >= 2000 },
+    // Rachas y rendimiento
+    { id:'perfect_win',    icon:'💎', title:'¡Sin perder una!',   desc:'Gana una partida sin ceder ninguna ronda', check: d => d.perfectWins >= 1 },
+    { id:'perfect_5',      icon:'💠', title:'Imparable',          desc:'Gana 5 partidas sin ceder rondas',       check: d => d.perfectWins >= 5 },
+    { id:'comeback',       icon:'🔄', title:'Remontada épica',    desc:'Gana una partida después de ir 0-2',      check: d => d.comebacks >= 1 },
+    // Partidas jugadas
+    { id:'played_10',      icon:'📖', title:'Aprendiz',           desc:'Juega 10 partidas',                      check: d => (d.wins||0)+(d.losses||0) >= 10 },
+    { id:'played_100',     icon:'📚', title:'Estudioso',          desc:'Juega 100 partidas',                     check: d => (d.wins||0)+(d.losses||0) >= 100 },
+    // Pokédex (tipos usados)
+    { id:'type_explorer',  icon:'🗺️', title:'Explorador de Tipos', desc:'Selecciona todos los 18 tipos al menos una vez', check: d => (d.typesUsed||[]).length >= 18 },
+    // Sociales
+    { id:'private_match',  icon:'🔒', title:'Entre Amigos',       desc:'Juega una partida privada',              check: d => d.privateMatches >= 1 },
+  ];
+
+  function computeAchievements(data) {
+    return ACHIEVEMENTS.map(a => ({ ...a, unlocked: a.check(data) }));
+  }
+
+  function renderAchievements(data) {
+    const container = document.getElementById('achievements-list');
+    if (!container) return;
+    container.innerHTML = '';
+    const list = computeAchievements(data);
+    const unlocked = list.filter(a => a.unlocked).length;
+    document.getElementById('achievements-count').textContent = `${unlocked}/${list.length}`;
+    list.forEach(a => {
+      const el = document.createElement('div');
+      el.className = `achievement-item${a.unlocked ? '' : ' achievement-locked'}`;
+      el.title = a.unlocked ? '¡Desbloqueado!' : 'Bloqueado';
+      const icon = document.createElement('div');
+      icon.className = 'achievement-icon';
+      icon.textContent = a.icon;
+      const info = document.createElement('div');
+      info.className = 'achievement-info';
+      const title = document.createElement('div');
+      title.className = 'achievement-title';
+      title.textContent = a.title;
+      const desc = document.createElement('div');
+      desc.className = 'achievement-desc';
+      desc.textContent = a.desc;
+      info.appendChild(title);
+      info.appendChild(desc);
+      el.appendChild(icon);
+      el.appendChild(info);
+      container.appendChild(el);
+    });
+  }
   // Sprites de Pokémon Showdown: https://play.pokemonshowdown.com/sprites/trainers/
   const TRAINER_SPRITES = [
     // Protagonistas
@@ -1467,8 +1572,9 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 /* PROFILE CARD */
 .profile-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:10px;}
-.profile-sprite-wrap{width:96px;height:96px;display:flex;align-items:center;justify-content:center;}
-.profile-sprite{max-width:96px;max-height:96px;image-rendering:pixelated;cursor:pointer;}
+.profile-sprite-wrap{width:140px;height:140px;display:flex;align-items:center;justify-content:center;background:var(--bg3);border-radius:12px;border:2px solid var(--border);}
+.profile-sprite{max-width:140px;max-height:140px;image-rendering:pixelated;cursor:pointer;transition:transform .2s;}
+.profile-sprite:hover{transform:scale(1.05);}
 .profile-name{font-size:17px;font-weight:900;text-align:center;}
 .profile-rank-row{display:flex;align-items:center;gap:8px;}
 .profile-rank-icon{width:28px;height:28px;}
@@ -1484,24 +1590,34 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 .sprite-btn.selected{border-color:var(--accent);background:rgba(255,222,0,.1);}
 .sprite-btn img{width:56px;height:56px;image-rendering:pixelated;}
 
-/* RANKING */
+/* P3: RANKING — más compacto, sin aire, avatar más grande */
 .ranking-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
-.ranking-loading{padding:20px;text-align:center;color:var(--muted);font-size:14px;}
-.ranking-row{display:grid;grid-template-columns:28px 36px 1fr 22px auto;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border);transition:background .15s;}
+.ranking-loading{padding:16px;text-align:center;color:var(--muted);font-size:13px;}
+.ranking-row{display:grid;grid-template-columns:24px 48px 1fr auto;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--border);transition:background .15s;}
 .ranking-row:last-child{border-bottom:none;}
 .ranking-row:hover{background:var(--bg3);}
 .ranking-me{background:rgba(59,76,202,.15)!important;border-left:3px solid var(--accent2);}
 .ranking-bot{opacity:0.65;}
 .ranking-pos{font-family:var(--font-pixel);font-size:9px;text-align:center;color:var(--muted);}
-.ranking-avatar{width:32px;height:32px;border-radius:4px;image-rendering:pixelated;}
+.ranking-avatar{width:44px;height:44px;border-radius:4px;image-rendering:pixelated;object-fit:contain;}
 .ranking-me .ranking-avatar{outline:2px solid var(--accent2);}
-.ranking-info{min-width:0;}
-.ranking-name{font-weight:900;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.ranking-stats{font-size:10px;color:var(--muted);margin-top:1px;}
-.ranking-rank-icon{width:20px;height:20px;justify-self:center;}
-.ranking-pts{font-family:var(--font-pixel);font-size:9px;color:var(--accent);white-space:nowrap;text-align:right;}
+.ranking-info{min-width:0;display:flex;align-items:center;gap:6px;}
+.ranking-name{font-weight:900;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;}
+.ranking-rank-icon{width:18px;height:18px;flex-shrink:0;}
+.ranking-stats{font-size:10px;color:var(--muted);}
+.ranking-pts-col{display:flex;flex-direction:column;align-items:flex-end;gap:2px;}
+.ranking-pts{font-family:var(--font-pixel);font-size:10px;color:var(--accent);white-space:nowrap;}
 
-@media(max-width:900px){
+/* ACHIEVEMENTS */
+.achievements-header{width:100%;display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:10px;border-top:1px solid var(--border);}
+.achievements-list{width:100%;display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto;}
+.achievement-item{display:flex;align-items:center;gap:10px;background:var(--bg3);border:1px solid var(--accent2);border-radius:10px;padding:8px 10px;transition:all .15s;}
+.achievement-item:hover{border-color:var(--accent);}
+.achievement-locked{filter:grayscale(1);opacity:0.45;border-color:var(--border);}
+.achievement-icon{font-size:22px;flex-shrink:0;width:30px;text-align:center;}
+.achievement-info{flex:1;min-width:0;}
+.achievement-title{font-weight:900;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.achievement-desc{font-size:10px;color:var(--muted);margin-top:1px;}
   .menu-layout{grid-template-columns:1fr;overflow-y:auto;}
   .menu-col:first-child,.menu-col:last-child{border:none;border-top:1px solid var(--border);}
   .menu-col-center{order:-1;}
@@ -1553,8 +1669,8 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 .game-arena{display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:start;width:100%;max-width:800px;}
 .player-side{display:flex;flex-direction:column;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 12px;}
 .player-side.me{border-color:var(--accent2);}
-.player-side img.avatar{width:60px;height:60px;border-radius:50%;border:3px solid var(--border);}
-.player-side.me img.avatar{border-color:var(--accent2);}
+.player-side img.avatar{width:80px;height:80px;border-radius:4px;image-rendering:pixelated;object-fit:contain;}
+.player-side.me img.avatar{outline:2px solid var(--accent2);}
 .player-side .p-name{font-weight:900;font-size:13px;text-align:center;}
 .player-side .p-pts{font-size:12px;color:var(--accent);font-weight:700;}
 .player-side .p-rank{width:22px;height:22px;}
@@ -1628,7 +1744,7 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
 
 <!-- ===================== LANDING ===================== -->
 <div class="screen active" id="screen-landing">
-  <div class="version-badge">v0.11.2</div>
+  <div class="version-badge">v0.12.0</div>
   <div class="pokeball-hero"></div>
   <div class="logo"><span>PokeType</span><br>Duel<small>¿Cuánto sabes de tipos?</small></div>
   <div class="flex-row">
@@ -1711,6 +1827,12 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
           <div class="pstat"><div class="pstat-val user-losses">0</div><div class="pstat-label">Derrotas</div></div>
         </div>
         <button class="btn btn-secondary btn-sm" style="width:100%;margin-top:8px" onclick="openProfileEditor()">🎨 Cambiar entrenador</button>
+        <!-- Logros -->
+        <div class="achievements-header">
+          <span style="font-family:var(--font-pixel);font-size:9px;color:var(--accent);letter-spacing:1px">🏆 LOGROS</span>
+          <span id="achievements-count" style="font-size:11px;color:var(--muted);font-weight:700">0/0</span>
+        </div>
+        <div id="achievements-list" class="achievements-list"></div>
       </div>
     </div>
 
