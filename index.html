@@ -178,7 +178,7 @@
   let botPlayingRound = null;
 
   // ===================== AUTH =====================
-  window.registerWithEmail = async () => {
+  window._registerWithEmail = async () => {
     const username = document.getElementById('reg-username').value.trim();
     const email    = document.getElementById('reg-email').value.trim();
     const password = document.getElementById('reg-password').value;
@@ -198,7 +198,7 @@
     }
   };
 
-  window.loginWithEmail = async () => {
+  window._loginWithEmail = async () => {
     const email    = document.getElementById('login-email').value.trim();
     const password = document.getElementById('login-password').value;
     if (!email||!password) return showToast('Rellena todos los campos');
@@ -211,7 +211,7 @@
     }
   };
 
-  window.logout = async () => {
+  window._logout = async () => {
     if (roomListener) roomListener();
     await signOut(auth);
     showScreen('landing');
@@ -279,7 +279,7 @@
   }
 
   // ===================== ROOMS =====================
-  window.createPrivateRoom = async () => {
+  window._createPrivateRoom = async () => {
     const code = Math.random().toString(36).substr(2,6).toUpperCase();
     const me = getMyPlayerData();
     await set(ref(db, `rooms/${code}`), {
@@ -297,7 +297,7 @@
     document.getElementById('lobby-mode').textContent = '🔒 Sala Privada';
   };
 
-  window.joinPrivateRoom = async () => {
+  window._joinPrivateRoom = async () => {
     const code = document.getElementById('join-code-input').value.trim().toUpperCase();
     if (!code) return showToast('Introduce un código');
     const snap = await get(ref(db, `rooms/${code}`));
@@ -315,7 +315,7 @@
     document.getElementById('lobby-mode').textContent = '🔒 Sala Privada';
   };
 
-  window.startMatchmaking = async () => {
+  window._startMatchmaking = async () => {
     showScreen('matchmaking');
     await cleanStaleRooms();
     const snap = await get(ref(db, 'matchmaking/queue'));
@@ -394,7 +394,7 @@
     }, 5000);
   }
 
-  window.cancelMatchmaking = async () => {
+  window._cancelMatchmaking = async () => {
     if (botFallbackTimer) { clearTimeout(botFallbackTimer); botFallbackTimer = null; }
     if (matchmakingListener) { matchmakingListener(); matchmakingListener = null; }
     await remove(ref(db, `matchmaking/queue/${currentUser.uid}`));
@@ -477,7 +477,7 @@
     oppAvEl.style.imageRendering = hasOppS ? 'pixelated' : 'auto';
   }
 
-  window.startGame = async () => {
+  window._startGame = async () => {
     if (!isHost) return;
     if (Object.keys(currentRoom.players||{}).length < 2) return showToast('Necesitas 2 jugadores');
     await update(ref(db, `rooms/${currentRoomId}`), { status:'playing', currentRound:1, roundPhase:'type_selection', lastActivity:Date.now() });
@@ -624,7 +624,7 @@
     }
   }
 
-  window.submitType = async () => {
+  window._submitType = async () => {
     if (hasAnsweredType) return;
     const type = document.getElementById('selected-type').value;
     if (!type) return showToast('Selecciona un tipo');
@@ -705,7 +705,7 @@
     }
   }
 
-  window.submitPokemon = async () => {
+  window._submitPokemon = async () => {
     if (hasAnsweredPokemon) return;
     const snap = await get(ref(db, `rooms/${currentRoomId}`));
     if (!snap.exists()) return;
@@ -828,13 +828,13 @@
     }
   }
 
-  window.confirmLeave = () => {
+  window._confirmLeave = () => {
     const isMatchmaking = currentRoom?.type === 'matchmaking';
     document.getElementById('leave-confirm-warning').style.display = isMatchmaking ? 'block' : 'none';
     document.getElementById('leave-confirm-modal').classList.add('open');
   };
 
-  window.leaveRoom = async () => {
+  window._leaveRoom = async () => {
     document.getElementById('leave-confirm-modal').classList.remove('open');
     if (activityPingInterval) { clearInterval(activityPingInterval); activityPingInterval = null; }
     stopBot();
@@ -1204,7 +1204,7 @@
     'plumeria','guzma','rose','oleana','penny',
   ];
 
-  window.openProfileEditor = () => {
+  window._openProfileEditor = () => {
     renderSpriteGrid();
     document.getElementById('profile-modal').classList.add('open');
   };
@@ -1266,7 +1266,7 @@
     });
   }
 
-  window.searchPokemon = () => {
+  window._searchPokemon = () => {
     const input = document.getElementById('pokemon-search-input');
     const query = (input?.value||'').toLowerCase();
     const results = document.getElementById('search-results-race');
@@ -1304,14 +1304,14 @@
     }
   }
 
-  window.showScreen = showScreen;
+  window._showScreen = showScreen;
 
-  window.openAuthModal = (tab) => {
+  window._openAuthModal = (tab) => {
     document.getElementById('auth-modal').classList.add('open');
     window.switchAuthTab(tab);
   };
 
-  window.switchAuthTab = (tab) => {
+  window._switchAuthTab = (tab) => {
     const login = document.getElementById('auth-login');
     const reg   = document.getElementById('auth-register');
     login.style.display = tab === 'login'    ? 'flex' : 'none';
@@ -1932,5 +1932,30 @@ body{font-family:var(--font-body);background:var(--bg);color:var(--white);min-he
   </div>
 </div>
 
+<!-- Puente para funciones llamadas desde onclick inline -->
+<script>
+  function openAuthModal(tab) { if (window._openAuthModal) window._openAuthModal(tab); else { document.getElementById('auth-modal').classList.add('open'); switchAuthTab(tab); } }
+  function switchAuthTab(tab) {
+    var login = document.getElementById('auth-login');
+    var reg   = document.getElementById('auth-register');
+    if (login) login.style.display = tab === 'login'    ? 'flex' : 'none';
+    if (reg)   reg.style.display   = tab === 'register' ? 'flex' : 'none';
+  }
+  function loginWithEmail()      { window._loginWithEmail      && window._loginWithEmail(); }
+  function registerWithEmail()   { window._registerWithEmail   && window._registerWithEmail(); }
+  function logout()              { window._logout              && window._logout(); }
+  function startMatchmaking()    { window._startMatchmaking    && window._startMatchmaking(); }
+  function cancelMatchmaking()   { window._cancelMatchmaking   && window._cancelMatchmaking(); }
+  function createPrivateRoom()   { window._createPrivateRoom   && window._createPrivateRoom(); }
+  function joinPrivateRoom()     { window._joinPrivateRoom     && window._joinPrivateRoom(); }
+  function startGame()           { window._startGame           && window._startGame(); }
+  function submitType()          { window._submitType          && window._submitType(); }
+  function submitPokemon()       { window._submitPokemon       && window._submitPokemon(); }
+  function searchPokemon()       { window._searchPokemon       && window._searchPokemon(); }
+  function confirmLeave()        { window._confirmLeave        && window._confirmLeave(); }
+  function leaveRoom()           { window._leaveRoom           && window._leaveRoom(); }
+  function openProfileEditor()   { window._openProfileEditor   && window._openProfileEditor(); }
+  function showScreen(n)         { window._showScreen          && window._showScreen(n); }
+</script>
 </body>
 </html>
